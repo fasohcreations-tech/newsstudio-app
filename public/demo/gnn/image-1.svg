@@ -1,0 +1,7 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 640 360" width="640" height="360">
+  <rect width="640" height="360" fill="#0F172A"/>
+  <rect x="24" y="24" width="592" height="288" rx="12" fill="#1E3A5F"/>
+  <circle cx="120" cy="120" r="48" fill="#2563EB" opacity="0.6"/>
+  <polygon points="280,240 360,120 440,240" fill="#3B82F6" opacity="0.5"/>
+  <text x="320" y="310" text-anchor="middle" font-family="Inter, sans-serif" font-size="18" fill="#94A3B8">Sample News Image 1</text>
+</svg>

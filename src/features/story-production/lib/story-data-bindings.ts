@@ -1,0 +1,124 @@
+import { buildDefaultBindings } from "@/features/motion-scene-engine/lib/variable-binding";
+import {
+  STORY_BINDING_ALIASES,
+  STORY_FIELD_TO_BINDING,
+} from "@/features/story-production/constants/story-data.constants";
+import { isLibraryMediaRef } from "@/features/story-production/lib/library-media-reference";
+import type { StoryDataRecord } from "@/features/story-production/types/story-data.types";
+
+export function storyDataToBindings(
+  data: StoryDataRecord,
+): Record<string, string> {
+  const bindings: Record<string, string> = {};
+
+  for (const [fieldKey, bindingKey] of Object.entries(STORY_FIELD_TO_BINDING)) {
+    const value = data[fieldKey as keyof StoryDataRecord];
+    if (value === undefined || value === null) continue;
+
+    if (typeof value === "boolean") {
+      bindings[bindingKey] = value ? "true" : "false";
+      continue;
+    }
+
+    const str = String(value).trim();
+    if (!str) continue;
+
+    bindings[bindingKey] = str;
+
+    const aliases = STORY_BINDING_ALIASES[bindingKey];
+    if (aliases) {
+      for (const alias of aliases) {
+        bindings[alias] = str;
+      }
+    }
+  }
+
+  // Legacy compatibility — keep media keys distinct (do not clobber image).
+  if (bindings.subheadline) bindings.subtitle = bindings.subheadline;
+  if (bindings.main_video) bindings.video = bindings.main_video;
+  if (bindings.main_image) bindings.image = bindings.main_image;
+  if (bindings.reporter_photo) {
+    bindings.reporter_image = bindings.reporter_photo;
+    // Only fall back to image when no main_image is set.
+    if (!bindings.main_image) bindings.image = bindings.reporter_photo;
+  }
+  if (bindings.logo) bindings.channel_logo = bindings.logo;
+  if (bindings.voice_over) bindings.voice = bindings.voice_over;
+  if (bindings.background_music) bindings.music = bindings.background_music;
+  if (bindings.bible_verse) bindings.verse = bindings.bible_verse;
+  if (bindings.verse_reference) bindings.reference = bindings.verse_reference;
+  if (bindings.quote) bindings.author = bindings.quote;
+
+  return bindings;
+}
+
+/**
+ * Merge Story SSOT into bindings.
+ * Order: theme defaults → existing scene bindings → Story form (wins).
+ */
+export function mergeStoryDataBindings(
+  data: StoryDataRecord,
+  existing?: Record<string, string>,
+): Record<string, string> {
+  const base = { ...buildDefaultBindings(), ...existing };
+  const fromForm = storyDataToBindings(data);
+  const merged = { ...base };
+
+  for (const [key, value] of Object.entries(fromForm)) {
+    if (value !== undefined && value !== "") merged[key] = value;
+    if (value === "false") merged[key] = value;
+  }
+
+  return merged;
+}
+
+export function bindingsToStoryData(
+  bindings: Record<string, string>,
+  fallback?: StoryDataRecord,
+): StoryDataRecord {
+  const base = fallback ?? ({} as StoryDataRecord);
+
+  for (const [fieldKey, bindingKey] of Object.entries(STORY_FIELD_TO_BINDING)) {
+    const aliases = STORY_BINDING_ALIASES[bindingKey] ?? [bindingKey];
+    for (const alias of aliases) {
+      const value = bindings[alias];
+      if (value != null && value !== "") {
+        const field = fieldKey as keyof StoryDataRecord;
+        if (
+          field === "breaking_news" ||
+          field === "live" ||
+          field === "grid_visibility" ||
+          field === "video_mask" ||
+          field === "video_top_bar_visible" ||
+          field === "video_bottom_bar_visible"
+        ) {
+          (base as Record<string, unknown>)[field] =
+            value === "true" || value === "1";
+        } else {
+          (base as Record<string, unknown>)[field] = value;
+        }
+        break;
+      }
+    }
+  }
+
+  return base;
+}
+
+export function resolveBindingMediaUrl(
+  bindings: Record<string, string>,
+  keys: string[],
+): string | null {
+  for (const key of keys) {
+    const value = bindings[key];
+    if (
+      value &&
+      value !== "#" &&
+      !value.startsWith("{{") &&
+      !isLibraryMediaRef(value)
+    ) {
+      return value;
+    }
+  }
+  return null;
+}

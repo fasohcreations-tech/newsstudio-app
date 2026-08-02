@@ -1,0 +1,47 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://mediaos.local/schemas/gnn-broadcast-package/v1.json",
+  "title": "GNN Broadcast Package v1",
+  "type": "object",
+  "required": ["package_id", "version", "design_system", "components", "master_scenes"],
+  "properties": {
+    "package_id": { "const": "gnn-broadcast-v1" },
+    "version": { "type": "string" },
+    "design_system": { "type": "object" },
+    "components": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["slug", "name", "component_kind"],
+        "properties": {
+          "slug": { "type": "string" },
+          "name": { "type": "string" },
+          "component_kind": { "type": "string" }
+        }
+      }
+    },
+    "master_scenes": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["code", "name", "scene_type", "composer_document"],
+        "properties": {
+          "code": { "type": "string", "pattern": "^GNN-\\d{3}$" },
+          "name": { "type": "string" },
+          "scene_type": { "type": "string" },
+          "composer_document": { "$ref": "./scene-composer.schema.json" },
+          "responsive_documents": {
+            "type": "object",
+            "required": ["1920x1080", "1080x1920", "1080x1080", "3840x2160"],
+            "properties": {
+              "1920x1080": { "$ref": "./scene-composer.schema.json" },
+              "1080x1920": { "$ref": "./scene-composer.schema.json" },
+              "1080x1080": { "$ref": "./scene-composer.schema.json" },
+              "3840x2160": { "$ref": "./scene-composer.schema.json" }
+            }
+          }
+        }
+      }
+    }
+  }
+}

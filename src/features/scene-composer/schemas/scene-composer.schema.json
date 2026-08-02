@@ -1,0 +1,80 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://mediaos.local/schemas/scene-composer/v2.json",
+  "title": "MediaOS Scene Composer Document v2.0",
+  "description": "Editable JSON for Module 3.3 Scene Composer. Extends motion scene v1.0.",
+  "type": "object",
+  "required": ["version", "objects", "layers", "placeholders", "variables", "animations", "bindings", "keyframes"],
+  "properties": {
+    "version": { "const": "2.0" },
+    "objects": {
+      "type": "array",
+      "items": { "$ref": "#/$defs/object" }
+    },
+    "bindings": {
+      "type": "array",
+      "items": { "$ref": "#/$defs/binding" }
+    },
+    "keyframes": {
+      "type": "array",
+      "items": { "$ref": "#/$defs/keyframe" }
+    },
+    "layers": { "type": "array" },
+    "placeholders": { "type": "array" },
+    "variables": { "type": "array" },
+    "animations": { "type": "array" }
+  },
+  "$defs": {
+    "object": {
+      "type": "object",
+      "required": ["id", "name", "object_type", "transform", "visible"],
+      "properties": {
+        "id": { "type": "string" },
+        "name": { "type": "string" },
+        "object_type": { "type": "string" },
+        "parent_object_id": { "type": ["string", "null"] },
+        "component_id": { "type": ["string", "null"] },
+        "transform": {
+          "type": "object",
+          "properties": {
+            "x": { "type": "number" },
+            "y": { "type": "number" },
+            "width": { "type": "number" },
+            "height": { "type": "number" },
+            "scale": { "type": "number" },
+            "rotation": { "type": "number" },
+            "opacity": { "type": "number", "minimum": 0, "maximum": 1 }
+          }
+        },
+        "bindings": { "type": "object" },
+        "style": { "type": "object" },
+        "content": { "type": "object" }
+      }
+    },
+    "binding": {
+      "type": "object",
+      "required": ["id", "variable_key", "token"],
+      "properties": {
+        "id": { "type": "string" },
+        "object_id": { "type": ["string", "null"] },
+        "variable_key": { "type": "string" },
+        "token": { "type": "string" },
+        "target_property": { "type": "string" },
+        "binding_source": { "type": "string" }
+      }
+    },
+    "keyframe": {
+      "type": "object",
+      "required": ["id", "property", "at_ms", "value"],
+      "properties": {
+        "id": { "type": "string" },
+        "object_id": { "type": ["string", "null"] },
+        "property": { "type": "string" },
+        "at_ms": { "type": "number" },
+        "value": {},
+        "easing": { "type": "string" },
+        "bezier_curve": { "type": ["object", "null"] }
+      }
+    }
+  }
+}

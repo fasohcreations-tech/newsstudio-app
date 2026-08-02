@@ -1,0 +1,272 @@
+"use client";
+
+import { useEffect, useMemo, useRef, useState } from "react";
+
+import {
+  getEdgeSweepConfig,
+  resolveCornerRadius,
+  roundedRectPerimeter,
+} from "@/features/scene-composer/lib/edge-sweep";
+import type { EdgeSweepConfig } from "@/features/scene-composer/lib/edge-sweep";
+import type { SceneObject } from "@/features/scene-composer/types/scene-composer.types";
+
+type EdgeSweepOverlayProps = {
+  object: SceneObject;
+  playheadMs?: number;
+  isPlaying?: boolean;
+  previewNonce?: number;
+  hovered?: boolean;
+};
+
+function styleColor(config: EdgeSweepConfig): string {
+  switch (config.style) {
+    case "gold":
+      return config.color || "#C6A15B";
+    case "broadcast_blue":
+      return config.color || "#5B8DEF";
+    case "metallic":
+      return config.color || "#94A3B8";
+    default:
+      return config.color;
+  }
+}
+
+function dashPattern(config: EdgeSweepConfig, perimeter: number): string {
+  const len = Math.max(
+    24,
+    perimeter * Math.min(0.9, Math.max(0.06, config.length)),
+  );
+
+  switch (config.style) {
+    case "dual": {
+      const seg = len * 0.7;
+      const gap = Math.max(8, perimeter / 2 - seg);
+      return `${seg} ${gap}`;
+    }
+    case "four_corner": {
+      const seg = Math.max(16, len * 0.45);
+      const gap = Math.max(8, perimeter / 4 - seg);
+      return `${seg} ${gap}`;
+    }
+    case "dashed": {
+      const seg = Math.max(10, len * 0.22);
+      const gap = seg * 1.35;
+      return `${seg} ${gap}`;
+    }
+    default: {
+      const gap = Math.max(8, perimeter - len);
+      return `${len} ${gap}`;
+    }
+  }
+}
+
+/**
+ * GPU-friendly SVG perimeter sweep — stroke-dashoffset only.
+ */
+export function EdgeSweepOverlay({
+  object,
+  playheadMs = 0,
+  isPlaying = false,
+  previewNonce = 0,
+  hovered = false,
+}: EdgeSweepOverlayProps) {
+  const config = getEdgeSweepConfig(object);
+  const pathRef = useRef<SVGRectElement>(null);
+  const trailRef = useRef<SVGRectElement>(null);
+  const [onceDone, setOnceDone] = useState(false);
+  const [sceneStarted, setSceneStarted] = useState(false);
+  const [localPreviewNonce, setLocalPreviewNonce] = useState(0);
+  const activePreviewNonce = previewNonce || localPreviewNonce;
+
+  const width = Math.max(1, object.transform.width);
+  const height = Math.max(1, object.transform.height);
+  const radius = resolveCornerRadius(object, config);
+  // Keep the full stroke inside the object box (glow may still bloom outward).
+  const inset = Math.max(config.width + 1, 3);
+  const strokeColor = styleColor(config);
+  const perimeter = useMemo(
+    () =>
+      roundedRectPerimeter(
+        Math.max(1, width - inset * 2),
+        Math.max(1, height - inset * 2),
+        Math.max(0, radius - inset * 0.5),
+      ),
+    [width, height, radius, inset],
+  );
+  const dash = useMemo(
+    () => dashPattern(config, perimeter),
+    // Primitives only — config object identity changes every parent render.
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- intentional
+    [config.style, config.length, perimeter],
+  );
+
+  useEffect(() => {
+    if (isPlaying && playheadMs > 0) setSceneStarted(true);
+  }, [isPlaying, playheadMs]);
+
+  useEffect(() => {
+    const onPreview = (event: Event) => {
+      const detail = (event as CustomEvent<{ objectId?: string }>).detail;
+      if (detail?.objectId === object.id) {
+        setLocalPreviewNonce((n) => n + 1);
+        setOnceDone(false);
+      }
+    };
+    window.addEventListener("mediaos:edge-sweep-preview", onPreview);
+    return () =>
+      window.removeEventListener("mediaos:edge-sweep-preview", onPreview);
+  }, [object.id]);
+
+  useEffect(() => {
+    if (activePreviewNonce > 0) setOnceDone(false);
+  }, [activePreviewNonce]);
+
+  const shouldAnimate = (() => {
+    if (!config.enabled) return false;
+    switch (config.loop) {
+      case "continuous":
+        return true;
+      case "once":
+        return !onceDone || activePreviewNonce > 0;
+      case "on_hover":
+        return hovered || activePreviewNonce > 0;
+      case "on_scene_start":
+        return sceneStarted || isPlaying || activePreviewNonce > 0;
+      default:
+        return true;
+    }
+  })();
+
+  useEffect(() => {
+    if (!shouldAnimate) return;
+    const path = pathRef.current;
+    const trail = trailRef.current;
+    if (!path) return;
+
+    let raf = 0;
+    const start = performance.now();
+    const durationMs = Math.max(400, 1000 / Math.max(0.05, config.speed));
+
+    const tick = (now: number) => {
+      const elapsed = now - start;
+      let progress = (elapsed / durationMs) % 1;
+      if (config.loop === "once" && elapsed >= durationMs) {
+        progress = 1;
+        setOnceDone(true);
+      }
+      if (config.direction === "counterclockwise") {
+        progress = 1 - progress;
+      }
+      const offset = perimeter * progress;
+      const dir = config.direction === "clockwise" ? -1 : 1;
+      path.setAttribute("stroke-dashoffset", String(dir * offset));
+      if (trail) {
+        trail.setAttribute(
+          "stroke-dashoffset",
+          String(dir * offset + perimeter * 0.03),
+        );
+      }
+      if (!(config.loop === "once" && elapsed >= durationMs)) {
+        raf = requestAnimationFrame(tick);
+      }
+    };
+
+    raf = requestAnimationFrame(tick);
+    return () => cancelAnimationFrame(raf);
+  }, [
+    shouldAnimate,
+    config.speed,
+    config.direction,
+    config.loop,
+    perimeter,
+    activePreviewNonce,
+  ]);
+
+  if (!config.enabled) return null;
+
+  const rx = Math.max(
+    0,
+    Math.min(radius, Math.min(width, height) / 2) - inset * 0.35,
+  );
+  const glow = Math.max(0, config.glowIntensity);
+  const opacity = Math.min(
+    1,
+    Math.max(0.35, config.opacity) * Math.min(1.4, config.brightness),
+  );
+  const trailOpacity = opacity * Math.max(0.2, 1 - config.trailFade * 0.85);
+  const filterId = `edge-glow-${object.id.replace(/[^a-zA-Z0-9_-]/g, "")}`;
+
+  return (
+    <svg
+      aria-hidden
+      className="pointer-events-none absolute inset-0"
+      width="100%"
+      height="100%"
+      viewBox={`0 0 ${width} ${height}`}
+      preserveAspectRatio="none"
+      style={{
+        zIndex: 40,
+        overflow: "visible",
+        mixBlendMode: config.blendMode === "screen" ? "normal" : config.blendMode,
+        transform: "translateZ(0)",
+        pointerEvents: "none",
+      }}
+    >
+      <defs>
+        <filter
+          id={filterId}
+          x="-50%"
+          y="-50%"
+          width="200%"
+          height="200%"
+        >
+          <feGaussianBlur stdDeviation={1 + glow * 2.5} result="blur" />
+          <feMerge>
+            <feMergeNode in="blur" />
+            <feMergeNode in="SourceGraphic" />
+          </feMerge>
+        </filter>
+      </defs>
+
+      {config.trailLength > 0.05 ? (
+        <rect
+          ref={trailRef}
+          x={inset}
+          y={inset}
+          width={Math.max(1, width - inset * 2)}
+          height={Math.max(1, height - inset * 2)}
+          rx={rx}
+          ry={rx}
+          fill="none"
+          stroke={strokeColor}
+          strokeWidth={Math.max(1.5, config.width * 0.85)}
+          strokeLinecap="round"
+          strokeLinejoin="round"
+          strokeDasharray={dash}
+          strokeDashoffset={0}
+          opacity={trailOpacity * 0.55}
+          filter={glow > 0.05 ? `url(#${filterId})` : undefined}
+        />
+      ) : null}
+
+      <rect
+        ref={pathRef}
+        x={inset}
+        y={inset}
+        width={Math.max(1, width - inset * 2)}
+        height={Math.max(1, height - inset * 2)}
+        rx={rx}
+        ry={rx}
+        fill="none"
+        stroke={strokeColor}
+        strokeWidth={Math.max(2, config.width)}
+        strokeLinecap="round"
+        strokeLinejoin="round"
+        strokeDasharray={dash}
+        strokeDashoffset={0}
+        opacity={opacity}
+        filter={glow > 0.05 ? `url(#${filterId})` : undefined}
+      />
+    </svg>
+  );
+}

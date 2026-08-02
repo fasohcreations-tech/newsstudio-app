@@ -1,0 +1,110 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://mediaos.local/schemas/motion-scene/v1.json",
+  "title": "MediaOS Motion Scene Document",
+  "description": "Editable JSON document for Module 3.2 Motion Scene Engine. Never store as static images.",
+  "type": "object",
+  "required": [
+    "version",
+    "layers",
+    "placeholders",
+    "variables",
+    "animations"
+  ],
+  "properties": {
+    "version": { "type": "string", "const": "1.0" },
+    "layers": {
+      "type": "array",
+      "items": { "$ref": "#/$defs/layer" }
+    },
+    "placeholders": {
+      "type": "array",
+      "items": { "$ref": "#/$defs/placeholder" }
+    },
+    "variables": {
+      "type": "array",
+      "items": { "$ref": "#/$defs/variable" }
+    },
+    "animations": {
+      "type": "array",
+      "items": { "$ref": "#/$defs/animation" }
+    }
+  },
+  "$defs": {
+    "layer": {
+      "type": "object",
+      "required": [
+        "id",
+        "name",
+        "layer_type",
+        "start_ms",
+        "end_ms",
+        "transform",
+        "visible"
+      ],
+      "properties": {
+        "id": { "type": "string" },
+        "name": { "type": "string" },
+        "layer_type": { "type": "string" },
+        "start_ms": { "type": "number", "minimum": 0 },
+        "end_ms": { "type": "number", "minimum": 0 },
+        "offset_ms": { "type": "number" },
+        "visible": { "type": "boolean" },
+        "locked": { "type": "boolean" },
+        "transform": {
+          "type": "object",
+          "properties": {
+            "x": { "type": "number" },
+            "y": { "type": "number" },
+            "scale": { "type": "number" },
+            "rotation": { "type": "number" },
+            "opacity": { "type": "number", "minimum": 0, "maximum": 1 }
+          }
+        },
+        "style": { "type": "object" },
+        "content": { "type": "object" },
+        "metadata": { "type": "object" }
+      }
+    },
+    "placeholder": {
+      "type": "object",
+      "required": ["id", "placeholder_kind", "variable_key", "token"],
+      "properties": {
+        "id": { "type": "string" },
+        "placeholder_kind": { "type": "string" },
+        "variable_key": { "type": "string" },
+        "label": { "type": "string" },
+        "default_value": { "type": "string" },
+        "token": { "type": "string", "pattern": "^\\{\\{[a-z0-9_]+\\}\\}$" },
+        "binding_source": { "type": "string" }
+      }
+    },
+    "variable": {
+      "type": "object",
+      "required": ["id", "variable_key", "kind"],
+      "properties": {
+        "id": { "type": "string" },
+        "variable_key": { "type": "string" },
+        "label": { "type": "string" },
+        "kind": { "type": "string" },
+        "story_field": { "type": ["string", "null"] },
+        "brand_field": { "type": ["string", "null"] },
+        "auto_update": { "type": "boolean" }
+      }
+    },
+    "animation": {
+      "type": "object",
+      "required": ["id", "kind", "start_ms", "duration_ms"],
+      "properties": {
+        "id": { "type": "string" },
+        "layer_id": { "type": ["string", "null"] },
+        "kind": { "type": "string" },
+        "start_ms": { "type": "number" },
+        "duration_ms": { "type": "number" },
+        "easing": { "type": "string" },
+        "parameters": { "type": "object" },
+        "keyframes": { "type": "array" }
+      }
+    }
+  }
+}

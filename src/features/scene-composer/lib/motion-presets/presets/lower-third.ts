@@ -1,0 +1,135 @@
+import { definePreset } from "@/features/scene-composer/lib/motion-presets/define-preset";
+import type { MotionPreset } from "@/features/scene-composer/lib/motion-presets/types";
+
+export const LOWER_THIRD_PRESETS: MotionPreset[] = [
+  definePreset({
+    id: "l3.classic",
+    name: "Classic Lower Third",
+    category: "lower_third",
+    description: "Traditional slide-up name strap",
+    durationMs: 520,
+    tags: ["lower-third", "classic"],
+    icon: "l3",
+    motion: {
+      entrance: { type: "slide_up", durationMs: 500, delayMs: 80, easing: "ease_out" },
+      idle: { type: "none", speed: 1, loop: true },
+      exit: { type: "slide_down", durationMs: 360, delayMs: 0, easing: "ease_in" },
+    },
+  }),
+  definePreset({
+    id: "l3.modern",
+    name: "Modern Lower Third",
+    category: "lower_third",
+    description: "Wipe + fade modern strap",
+    durationMs: 480,
+    tags: ["lower-third", "modern", "wipe"],
+    icon: "l3",
+    motion: {
+      entrance: { type: "wipe_left", durationMs: 460, delayMs: 60, easing: "ease_out" },
+      idle: { type: "none", speed: 1, loop: true },
+      exit: { type: "fade_out", durationMs: 300, delayMs: 0, easing: "ease_in" },
+    },
+  }),
+  definePreset({
+    id: "l3.breaking",
+    name: "Breaking Lower Third",
+    category: "lower_third",
+    description: "Snappy breaking name plate",
+    durationMs: 360,
+    tags: ["lower-third", "breaking"],
+    icon: "flash",
+    motion: {
+      entrance: { type: "slide_left", durationMs: 320, delayMs: 0, easing: "cubic" },
+      idle: { type: "glow", speed: 1.1, loop: true },
+      exit: { type: "slide_left", durationMs: 280, delayMs: 0, easing: "ease_in" },
+      speed: 1.15,
+    },
+  }),
+  definePreset({
+    id: "l3.bible-verse",
+    name: "Bible Verse Lower Third",
+    category: "lower_third",
+    description: "Gentle fade strap for verses",
+    durationMs: 700,
+    tags: ["lower-third", "verse", "faith"],
+    icon: "text",
+    motion: {
+      entrance: { type: "fade_in", durationMs: 650, delayMs: 120, easing: "ease_in_out" },
+      idle: { type: "none", speed: 1, loop: true },
+      exit: { type: "fade_out", durationMs: 480, delayMs: 0, easing: "ease_in" },
+    },
+  }),
+  definePreset({
+    id: "l3.quote-reveal",
+    name: "Quote Reveal",
+    category: "lower_third",
+    description: "Mask reveal for quoted lines",
+    durationMs: 620,
+    tags: ["quote", "mask", "reveal"],
+    icon: "quote",
+    motion: {
+      entrance: { type: "mask_reveal", durationMs: 600, delayMs: 80, easing: "ease_out" },
+      idle: { type: "none", speed: 1, loop: true },
+      exit: { type: "mask_close", durationMs: 380, delayMs: 0, easing: "ease_in" },
+    },
+  }),
+  definePreset({
+    id: "l3.dual-line",
+    name: "Dual Line Lower Third",
+    category: "lower_third",
+    description: "Stagger-friendly dual line plate",
+    durationMs: 560,
+    tags: ["lower-third", "dual", "lines"],
+    icon: "l3",
+    motion: {
+      entrance: { type: "slide_up", durationMs: 480, delayMs: 140, easing: "ease_out" },
+      idle: { type: "none", speed: 1, loop: true },
+      exit: { type: "fade_out", durationMs: 320, delayMs: 0, easing: "ease_in" },
+    },
+  }),
+];
+
+export const REPORTER_PRESETS: MotionPreset[] = [
+  definePreset({
+    id: "reporter.slide-in",
+    name: "Reporter Slide In",
+    category: "reporter",
+    description: "Talent card slides from left",
+    durationMs: 560,
+    tags: ["reporter", "slide"],
+    icon: "reporter",
+    motion: {
+      entrance: { type: "slide_left", durationMs: 540, delayMs: 100, easing: "ease_out" },
+      idle: { type: "none", speed: 1, loop: true },
+      exit: { type: "slide_left", durationMs: 360, delayMs: 0, easing: "ease_in" },
+    },
+  }),
+  definePreset({
+    id: "reporter.soft-fade",
+    name: "Reporter Soft Fade",
+    category: "reporter",
+    description: "Soft reporter fade with float",
+    durationMs: 500,
+    tags: ["reporter", "fade"],
+    icon: "reporter",
+    motion: {
+      entrance: { type: "fade_in", durationMs: 480, delayMs: 80, easing: "ease_out" },
+      idle: { type: "float", speed: 0.5, loop: true },
+      exit: { type: "fade_out", durationMs: 320, delayMs: 0, easing: "ease_in" },
+    },
+  }),
+  definePreset({
+    id: "reporter.badge-pop",
+    name: "Reporter Badge Pop",
+    category: "reporter",
+    description: "Quick pop for reporter badge",
+    durationMs: 340,
+    tags: ["reporter", "badge", "pop"],
+    icon: "pop",
+    motion: {
+      entrance: { type: "scale_in", durationMs: 300, delayMs: 40, easing: "cubic" },
+      idle: { type: "none", speed: 1, loop: true },
+      exit: { type: "scale_out", durationMs: 240, delayMs: 0, easing: "ease_in" },
+    },
+  }),
+];
