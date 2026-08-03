@@ -5,6 +5,10 @@ import type {
   NewsProducerKind,
   NewsProducerSection,
 } from "@/features/ai-news-producer/constants/producer.constants";
+import {
+  parseSubHeadlineMedia,
+  type SubHeadlineMediaRef,
+} from "@/features/story-production/lib/sub-headlines";
 
 export type NewsProducerAiMeta = {
   jobId: string | null;
@@ -26,6 +30,8 @@ export type NewsProducerMetadata = {
   bodyFormat: "markdown" | "plain";
   approvalStatus: NewsProducerApprovalStatus;
   ai: NewsProducerAiMeta;
+  /** Per-slot media refs when kind is summary (sub-headlines). */
+  subHeadlineMedia?: SubHeadlineMediaRef[];
 };
 
 export type NewsProducerOutput = ContentObject & {
@@ -69,6 +75,10 @@ export function parseProducerMetadata(
     body: bag.body,
     bodyFormat: bag.bodyFormat === "plain" ? "plain" : "markdown",
     approvalStatus: approval,
+    subHeadlineMedia:
+      bag.kind === "summary"
+        ? parseSubHeadlineMedia(bag.subHeadlineMedia)
+        : undefined,
     ai: {
       jobId: typeof aiRaw.jobId === "string" ? aiRaw.jobId : null,
       provider: typeof aiRaw.provider === "string" ? aiRaw.provider : "unknown",

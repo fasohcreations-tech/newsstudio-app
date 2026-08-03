@@ -1,12 +1,12 @@
 "use client";
 
+import { useEffect, useState, useTransition } from "react";
 import {
   Clapperboard,
-  FileText,
-  ImageIcon,
   Sparkles,
   ArrowRight,
 } from "lucide-react";
+import { toast } from "sonner";
 
 import { Button } from "@/components/ui/button";
 import {
@@ -21,43 +21,37 @@ import { StoryStatusBadge } from "@/features/newsroom/components/story-status-ba
 import { StoryPriorityIndicator } from "@/features/newsroom/components/story-priority-indicator";
 import { RelativeTime } from "@/features/newsroom/components/relative-time";
 import { profileDisplayName } from "@/features/newsroom/lib/story-utils";
+import { updateStoryAction } from "@/features/newsroom/actions/story.actions";
 import type { StoryWithRelations } from "@/features/newsroom/types/story.types";
 import type { StoryWorkspaceTabId } from "@/features/story-workspace/constants/workspace-tabs";
+import { SubHeadlineSlotsEditor } from "@/features/story-production/components/form/sub-headline-slots-editor";
+import {
+  joinSubHeadlineSlots,
+  parseSubHeadlineMedia,
+  parseSubHeadlineSlots,
+  serializeSubHeadlineMedia,
+  type SubHeadlineMediaRef,
+} from "@/features/story-production/lib/sub-headlines";
 
 type OverviewTabProps = {
   story: StoryWithRelations;
   onOpenTab: (tab: StoryWorkspaceTabId) => void;
+  onStoryUpdated?: (story: StoryWithRelations) => void;
 };
 
 const WORKSPACE_MODULES: Array<{
   id: StoryWorkspaceTabId;
   title: string;
   description: string;
-  icon: typeof FileText;
+  icon: typeof Sparkles;
   ready: boolean;
   shortcut?: string;
 }> = [
   {
-    id: "script",
-    title: "Script",
-    description: "Write and auto-save the story script body.",
-    icon: FileText,
-    ready: true,
-    shortcut: "Ctrl+2",
-  },
-  {
-    id: "media",
-    title: "Media",
-    description: "Attach images, video, and audio from the library.",
-    icon: ImageIcon,
-    ready: true,
-    shortcut: "Ctrl+3",
-  },
-  {
     id: "ai-producer",
     title: "AI Producer",
     description:
-      "Generate research, headlines, summary, TV script, website article, SEO, and social — via Gemini.",
+      "Script, media, research, sub-headlines, website, SEO, and social — via Gemini (Manglish editing).",
     icon: Sparkles,
     ready: true,
     shortcut: "Ctrl+4",
@@ -72,7 +66,29 @@ const WORKSPACE_MODULES: Array<{
   },
 ];
 
-export function OverviewTab({ story, onOpenTab }: OverviewTabProps) {
+export function OverviewTab({
+  story,
+  onOpenTab,
+  onStoryUpdated,
+}: OverviewTabProps) {
+  const [pending, startTransition] = useTransition();
+  const [slotTexts, setSlotTexts] = useState(() =>
+    parseSubHeadlineSlots(story.summary),
+  );
+  const [slotMedia, setSlotMedia] = useState<SubHeadlineMediaRef[]>(() =>
+    parseSubHeadlineMedia(story.sub_headline_media),
+  );
+  const [dirty, setDirty] = useState(false);
+
+  useEffect(() => {
+    if (dirty) return;
+    setSlotTexts(parseSubHeadlineSlots(story.summary));
+    setSlotMedia(parseSubHeadlineMedia(story.sub_headline_media));
+  }, [story.id, story.summary, story.sub_headline_media, story.updated_at, dirty]);
+
+  const hasContent =
+    slotTexts.some(Boolean) || slotMedia.some((slot) => slot.kind);
+
   return (
     <div className="space-y-5">
       <Card className="border-border/60">
@@ -89,14 +105,104 @@ export function OverviewTab({ story, onOpenTab }: OverviewTabProps) {
           ) : null}
         </CardHeader>
         <CardContent className="space-y-4">
-          <div>
-            <h3 className="mb-1 text-xs font-semibold tracking-wide text-muted-foreground uppercase">
-              Summary
+          <div className="space-y-2">
+            <h3 className="text-xs font-semibold tracking-wide text-muted-foreground uppercase">
+              Sub Headlines
             </h3>
-            <p className="text-sm leading-relaxed text-muted-foreground">
-              {story.summary?.trim() ||
-                "No summary yet. Add one via Edit metadata — AI Producer uses it as context."}
-            </p>
+            {hasContent || dirty ? (
+              <>
+                <SubHeadlineSlotsEditor
+                  texts={slotTexts}
+                  media={slotMedia}
+                  organizationId={story.organization_id}
+                  storyId={story.id}
+                  disabled={pending}
+                  onTextsChange={(texts) => {
+                    setSlotTexts(texts);
+                    setDirty(true);
+                  }}
+                  onMediaChange={(media) => {
+                    setSlotMedia(media);
+                    setDirty(true);
+                  }}
+                />
+                <div className="flex flex-wrap items-center gap-2">
+                  <Button
+                    type="button"
+                    size="sm"
+                    disabled={pending || !dirty}
+                    onClick={() =>
+                      startTransition(async () => {
+                        const primary =
+                          slotTexts.find((slot) => slot.trim()) ?? "";
+                        const result = await updateStoryAction(story.id, {
+                          title: story.title,
+                          subtitle: primary || story.subtitle || "",
+                          summary: joinSubHeadlineSlots(slotTexts),
+                          sub_headline_media:
+                            serializeSubHeadlineMedia(slotMedia),
+                          status: story.status,
+                          priority: story.priority,
+                          category: story.category ?? "",
+                          language: story.language,
+                        });
+                        if (!result.success) {
+                          toast.error(result.error);
+                          return;
+                        }
+                        setDirty(false);
+                        onStoryUpdated?.({
+                          ...story,
+                          summary: joinSubHeadlineSlots(slotTexts),
+                          subtitle: primary || story.subtitle,
+                          sub_headline_media:
+                            serializeSubHeadlineMedia(slotMedia),
+                        });
+                        toast.success("Sub headlines & media saved");
+                      })
+                    }
+                  >
+                    Save media & text
+                  </Button>
+                  {dirty ? (
+                    <Button
+                      type="button"
+                      size="sm"
+                      variant="ghost"
+                      disabled={pending}
+                      onClick={() => {
+                        setSlotTexts(parseSubHeadlineSlots(story.summary));
+                        setSlotMedia(
+                          parseSubHeadlineMedia(story.sub_headline_media),
+                        );
+                        setDirty(false);
+                      }}
+                    >
+                      Discard
+                    </Button>
+                  ) : (
+                    <p className="text-[11px] text-muted-foreground">
+                      Link Image, Video, or Caption per slot for scene building.
+                    </p>
+                  )}
+                </div>
+              </>
+            ) : (
+              <div className="space-y-2">
+                <p className="text-sm leading-relaxed text-muted-foreground">
+                  No sub-headlines yet. Generate them in AI Producer, or start
+                  slots here.
+                </p>
+                <Button
+                  type="button"
+                  size="sm"
+                  variant="outline"
+                  onClick={() => setDirty(true)}
+                >
+                  Add Sub Headlines
+                </Button>
+              </div>
+            )}
           </div>
           <dl className="grid gap-3 text-sm sm:grid-cols-2 lg:grid-cols-4">
             <Meta label="Category" value={story.category ?? "—"} />
@@ -125,8 +231,8 @@ export function OverviewTab({ story, onOpenTab }: OverviewTabProps) {
             Story workspace
           </h3>
           <p className="text-sm text-muted-foreground">
-            Features live in the tabs above this panel — not only on Overview.
-            Use the right sidebar for the Story AI chat assistant.
+            Script and media live in AI Producer. Voice stays in its own tab for
+            TTS.
           </p>
         </div>
 
@@ -177,14 +283,6 @@ export function OverviewTab({ story, onOpenTab }: OverviewTabProps) {
           <Button type="button" onClick={() => onOpenTab("ai-producer")}>
             <Sparkles className="size-4" />
             Open AI Producer
-          </Button>
-          <Button
-            type="button"
-            variant="outline"
-            onClick={() => onOpenTab("script")}
-          >
-            <FileText className="size-4" />
-            Write script
           </Button>
         </div>
       </section>

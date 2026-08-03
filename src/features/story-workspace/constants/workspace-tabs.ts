@@ -1,11 +1,13 @@
 export const STORY_WORKSPACE_TABS = [
   { id: "overview", label: "Overview", ready: true },
-  { id: "script", label: "Script", ready: true },
-  { id: "media", label: "Media", ready: true },
+  /** Script editing lives under AI Producer → Script */
+  { id: "script", label: "Script", ready: false },
+  /** Media lives under AI Producer → Media */
+  { id: "media", label: "Media", ready: false },
   { id: "ai-producer", label: "AI Producer", ready: true },
   { id: "timeline", label: "Timeline", ready: true },
   { id: "graphics", label: "Graphics", ready: true },
-  { id: "voice", label: "Voice", ready: false },
+  { id: "voice", label: "Voice", ready: true },
   { id: "publishing", label: "Publishing", ready: false },
   { id: "broadcast", label: "Broadcast", ready: false },
   { id: "analytics", label: "Analytics", ready: false },

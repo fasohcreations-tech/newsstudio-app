@@ -922,6 +922,48 @@ function PreviewObject({
     transitionStyle,
   ]);
 
+  const subHeadlineSlides = useMemo(() => {
+    if (!isSubheadlineRegion) return [] as string[];
+    const fromSlots = [
+      bindings.sub_headline_1,
+      bindings.sub_headline_2,
+      bindings.sub_headline_3,
+      bindings.sub_headline_4,
+    ]
+      .map((item) => String(item ?? "").trim())
+      .filter(Boolean);
+    if (fromSlots.length > 0) return fromSlots;
+    return String(bindings.summary ?? "")
+      .split(/\r?\n+/)
+      .map((item) => item.trim())
+      .filter(Boolean);
+  }, [
+    bindings.sub_headline_1,
+    bindings.sub_headline_2,
+    bindings.sub_headline_3,
+    bindings.sub_headline_4,
+    bindings.summary,
+    isSubheadlineRegion,
+  ]);
+  const [subHeadlineIndex, setSubHeadlineIndex] = useState(0);
+  useEffect(() => {
+    if (subHeadlineSlides.length <= 1) return;
+    const timer = window.setInterval(() => {
+      setSubHeadlineIndex((index) => (index + 1) % subHeadlineSlides.length);
+    }, intervalMs);
+    return () => window.clearInterval(timer);
+  }, [intervalMs, subHeadlineSlides.length]);
+  useEffect(() => {
+    setSubHeadlineIndex(0);
+  }, [
+    bindings.sub_headline_1,
+    bindings.sub_headline_2,
+    bindings.sub_headline_3,
+    bindings.sub_headline_4,
+    bindings.summary,
+    object.id,
+  ]);
+
   if (isLegacyMetaPartObject(object)) {
     if (hasMetaInfoBar) return null;
     if (regionKey !== "clock") return null;
@@ -1139,6 +1181,13 @@ function PreviewObject({
       regionKey,
     });
     const label = resolveObjectDisplayText(object, bindings);
+    const rotatingSubHeadline =
+      isSubheadlineRegion && subHeadlineSlides.length > 0
+        ? subHeadlineSlides[
+            Math.max(0, subHeadlineIndex) % subHeadlineSlides.length
+          ] ?? null
+        : null;
+    const displayLabel = rotatingSubHeadline || label;
     const mediaFromSrc =
       typeof object.bindings.src === "string"
         ? resolveVariableTokens(object.bindings.src, bindings)
@@ -1262,8 +1311,10 @@ function PreviewObject({
 
     // Text / ticker / clock / date — bind from Story; placeholder only if empty.
     const resolved =
-      label && !label.startsWith("{{") && label.trim().length > 0
-        ? label
+      displayLabel &&
+      !displayLabel.startsWith("{{") &&
+      displayLabel.trim().length > 0
+        ? displayLabel
         : null;
     const isTextish =
       isTextLikeObject(object) ||
@@ -1415,10 +1466,17 @@ function PreviewObject({
   const mediaUrl = resolveObjectMediaUrl(object, bindings);
   const isText = isTextLikeObject(object);
   const label = resolveObjectDisplayText(object, bindings);
+  const rotatingSubHeadline =
+    isSubheadlineRegion && subHeadlineSlides.length > 0
+      ? subHeadlineSlides[
+          Math.max(0, subHeadlineIndex) % subHeadlineSlides.length
+        ] ?? null
+      : null;
+  const displayLabel = rotatingSubHeadline || label;
   const primaryColor = bindings.primary_color ?? "#1D4ED8";
   const storyFontResolved = resolveStoryMalayalamFont(bindings);
   const fontFamily = storyMalayalamFontFamilyCss(storyFontResolved.family);
-  const showPlaceholder = !hasResolvedContent(object, bindings, label);
+  const showPlaceholder = !hasResolvedContent(object, bindings, displayLabel);
 
   const baseStyle: React.CSSProperties = withLayerMotion(
     {
@@ -1577,7 +1635,7 @@ function PreviewObject({
         {showPlaceholder ? (
           <ReadablePlaceholder kind={kind} />
         ) : (
-          label
+          displayLabel
         )}
       </SelectableShell>
     );

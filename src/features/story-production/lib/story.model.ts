@@ -14,7 +14,31 @@ export const STORY_ENGINE_VERSION = "3.7";
 export const STORY_MODEL_FIELDS = [
   { key: "headline", binding: "headline", label: "Headline" },
   { key: "subheadline", binding: "subheadline", label: "Subheadline" },
-  { key: "summary", binding: "summary", label: "Summary" },
+  { key: "sub_headline_1", binding: "sub_headline_1", label: "Sub Headline 1" },
+  { key: "sub_headline_2", binding: "sub_headline_2", label: "Sub Headline 2" },
+  { key: "sub_headline_3", binding: "sub_headline_3", label: "Sub Headline 3" },
+  { key: "sub_headline_4", binding: "sub_headline_4", label: "Sub Headline 4" },
+  {
+    key: "sub_headline_1_media",
+    binding: "sub_headline_1_media",
+    label: "Sub Headline 1 Media",
+  },
+  {
+    key: "sub_headline_2_media",
+    binding: "sub_headline_2_media",
+    label: "Sub Headline 2 Media",
+  },
+  {
+    key: "sub_headline_3_media",
+    binding: "sub_headline_3_media",
+    label: "Sub Headline 3 Media",
+  },
+  {
+    key: "sub_headline_4_media",
+    binding: "sub_headline_4_media",
+    label: "Sub Headline 4 Media",
+  },
+  { key: "summary", binding: "summary", label: "Summary (joined slots)" },
   { key: "reporter_name", binding: "reporter", label: "Reporter" },
   { key: "reporter_photo", binding: "reporter_photo", label: "Reporter Photo" },
   { key: "location", binding: "location", label: "Location" },

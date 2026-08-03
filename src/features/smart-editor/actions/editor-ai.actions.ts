@@ -10,7 +10,7 @@ import { generateText } from "@/features/ai/services/ai-orchestrator";
 import { checkAIRateLimit } from "@/features/ai/lib/rate-limit";
 import { EDITOR_AI_ACTIONS } from "@/features/smart-editor/types/editor.types";
 import { EDITOR_AI_ACTION_LABELS } from "@/features/smart-editor/constants/editor.constants";
-import { buildEditorAIPrompt } from "@/features/smart-editor/lib/ai-prompts";
+import { buildEditorAIPromptVariables } from "@/features/smart-editor/lib/ai-prompts";
 
 export type EditorActionResult<T> =
   | { success: true; data: T }
@@ -69,7 +69,7 @@ export async function runEditorAIAction(
   const { action, text, language, storyId, contentObjectId, targetLanguage } =
     parsed.data;
 
-  const { systemPrompt, prompt } = buildEditorAIPrompt({
+  const promptVariables = buildEditorAIPromptVariables({
     action,
     text,
     language,
@@ -85,8 +85,8 @@ export async function runEditorAIAction(
       jobType: `editor.${action}`,
       providerId: "gemini",
       locale: language === "en" ? "en" : "ml",
-      systemPrompt,
-      prompt,
+      promptId: "editor.transform",
+      promptVariables,
       temperature: 0.4,
     });
 

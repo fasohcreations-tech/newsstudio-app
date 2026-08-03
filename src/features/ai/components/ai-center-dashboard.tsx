@@ -21,6 +21,11 @@ import {
 import { RelativeTime } from "@/features/newsroom/components/relative-time";
 import type { AiJob } from "@/features/content/types/content.types";
 import {
+  formatJobCost,
+  formatTokenCount,
+  readJobPromptId,
+} from "@/features/ai/lib/ai-job-display";
+import {
   AI_JOB_STATUS_LABELS,
   type AIOrgSettings,
   type AIUsageStats,
@@ -70,6 +75,12 @@ export function AICenterDashboard({
     <div className="space-y-6">
       <div className="flex flex-wrap gap-2">
         <Link
+          href="/ai-center/usage"
+          className={cn(buttonVariants({ variant: "default" }))}
+        >
+          Token usage log
+        </Link>
+        <Link
           href="/settings/ai"
           className={cn(buttonVariants({ variant: "outline" }))}
         >
@@ -77,7 +88,7 @@ export function AICenterDashboard({
         </Link>
         <Link
           href="/ai-center/gemini-test"
-          className={cn(buttonVariants({ variant: "default" }))}
+          className={cn(buttonVariants({ variant: "outline" }))}
         >
           Gemini Test
         </Link>
@@ -164,11 +175,19 @@ export function AICenterDashboard({
 
       <div className="grid gap-4 lg:grid-cols-3">
         <Card className="border-border/60 lg:col-span-2">
-          <CardHeader>
-            <CardTitle>Recent AI jobs</CardTitle>
-            <CardDescription>
-              From <code className="text-xs">ai_jobs</code> for this organization.
-            </CardDescription>
+          <CardHeader className="flex flex-row flex-wrap items-start justify-between gap-2">
+            <div>
+              <CardTitle>Recent AI jobs</CardTitle>
+              <CardDescription>
+                Latest Orchestrator runs with tokens and estimated cost.
+              </CardDescription>
+            </div>
+            <Link
+              href="/ai-center/usage"
+              className="text-sm font-medium underline-offset-4 hover:underline"
+            >
+              Full token log →
+            </Link>
           </CardHeader>
           <CardContent>
             {jobsError ? (
@@ -183,31 +202,46 @@ export function AICenterDashboard({
                 <TableHeader>
                   <TableRow>
                     <TableHead>Type</TableHead>
+                    <TableHead>Prompt</TableHead>
                     <TableHead>Provider</TableHead>
                     <TableHead>Status</TableHead>
+                    <TableHead className="text-right">Tokens</TableHead>
+                    <TableHead className="text-right">Cost</TableHead>
                     <TableHead>Updated</TableHead>
                   </TableRow>
                 </TableHeader>
                 <TableBody>
-                  {jobs.map((job) => (
-                    <TableRow key={job.id}>
-                      <TableCell className="font-medium">{job.job_type}</TableCell>
-                      <TableCell>
-                        {job.provider}
-                        {job.model ? (
-                          <span className="block text-xs text-muted-foreground">
-                            {job.model}
-                          </span>
-                        ) : null}
-                      </TableCell>
-                      <TableCell>
-                        {AI_JOB_STATUS_LABELS[job.status] ?? job.status}
-                      </TableCell>
-                      <TableCell>
-                        <RelativeTime value={job.updated_at} />
-                      </TableCell>
-                    </TableRow>
-                  ))}
+                  {jobs.map((job) => {
+                    const promptId = readJobPromptId(job);
+                    return (
+                      <TableRow key={job.id}>
+                        <TableCell className="font-medium">{job.job_type}</TableCell>
+                        <TableCell className="max-w-[8rem] truncate text-xs text-muted-foreground">
+                          {promptId ?? "—"}
+                        </TableCell>
+                        <TableCell>
+                          {job.provider}
+                          {job.model ? (
+                            <span className="block text-xs text-muted-foreground">
+                              {job.model}
+                            </span>
+                          ) : null}
+                        </TableCell>
+                        <TableCell>
+                          {AI_JOB_STATUS_LABELS[job.status] ?? job.status}
+                        </TableCell>
+                        <TableCell className="text-right tabular-nums">
+                          {formatTokenCount(job.tokens_used)}
+                        </TableCell>
+                        <TableCell className="text-right tabular-nums text-sm">
+                          {formatJobCost(job.cost)}
+                        </TableCell>
+                        <TableCell>
+                          <RelativeTime value={job.updated_at} />
+                        </TableCell>
+                      </TableRow>
+                    );
+                  })}
                 </TableBody>
               </Table>
             )}

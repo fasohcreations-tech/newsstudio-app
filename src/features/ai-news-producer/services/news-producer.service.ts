@@ -12,7 +12,20 @@ import {
   listContentObjects,
   updateContentObject,
 } from "@/features/content/services/content.service";
-import { getCurrentStoryScript } from "@/features/story-workspace/services/script.service";
+import {
+  ensureCurrentStoryScript,
+  getCurrentStoryScript,
+  saveCurrentStoryScript,
+} from "@/features/story-workspace/services/script.service";
+import { countWords } from "@/features/story-workspace/lib/script-utils";
+import { approveStoryScript } from "@/features/story-voice/services/editorial-voice.service";
+import {
+  joinSubHeadlineSlots,
+  parseSubHeadlineSlots,
+  serializeSubHeadlineMedia,
+  type SubHeadlineMediaRef,
+} from "@/features/story-production/lib/sub-headlines";
+import type { Story } from "@/features/newsroom/types/story.types";
 import {
   NEWS_PRODUCER_CONTENT_TYPES,
   NEWS_PRODUCER_KIND_LABELS,
@@ -119,12 +132,7 @@ export async function generateProducerOutput(
     promptId,
     promptVariables: variables,
     locale,
-    systemPrompt: [
-      "You are a Malayalam newsroom AI for MediaOS.",
-      "Write the ENTIRE response in Malayalam script (മലയാളം).",
-      "Do not write English paragraphs. Proper nouns may stay in Latin script when needed.",
-      "Keep a professional Kerala news desk tone.",
-    ].join(" "),
+    systemPromptId: "news.system_malayalam_desk",
   });
 
   if (result.error || !result.data) {
@@ -259,15 +267,172 @@ export async function generateSeoPackage(
   return { data: outputs, error: null };
 }
 
+export type AppliedProducerStoryPatch = {
+  story?: Story;
+  script?: {
+    contentHtml: string;
+    contentPlain: string;
+    wordCount: number;
+    characterCount: number;
+    updatedAt: string;
+    version: number;
+  };
+};
+
+function plainTextToScriptHtml(plain: string): string {
+  const escaped = plain
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;");
+  const blocks = escaped
+    .split(/\n{2,}/)
+    .map((block) => block.trim())
+    .filter(Boolean);
+  if (blocks.length === 0) return "<p></p>";
+  return blocks
+    .map((block) => `<p>${block.replace(/\n/g, "<br>")}</p>`)
+    .join("");
+}
+
 export async function approveProducerOutput(
   client: Client,
-  args: { outputId: string; userId: string },
-): Promise<NewsProducerServiceResult<NewsProducerOutput>> {
-  return patchApproval(client, {
-    ...args,
+  args: {
+    outputId: string;
+    userId: string;
+    storyId: string;
+    organizationId: string;
+  },
+): Promise<
+  NewsProducerServiceResult<
+    NewsProducerOutput & { applied?: AppliedProducerStoryPatch }
+  >
+> {
+  const patched = await patchApproval(client, {
+    outputId: args.outputId,
+    userId: args.userId,
     approvalStatus: "approved",
     status: "ready",
   });
+  if (patched.error || !patched.data) return patched;
+
+  const applied = await applyApprovedProducerOutput(client, {
+    output: patched.data,
+    userId: args.userId,
+    storyId: args.storyId,
+    organizationId: args.organizationId,
+  });
+  if (applied.error) {
+    return { data: null, error: applied.error };
+  }
+
+  return {
+    data: { ...patched.data, applied: applied.data ?? undefined },
+    error: null,
+  };
+}
+
+async function applyApprovedProducerOutput(
+  client: Client,
+  args: {
+    output: NewsProducerOutput;
+    userId: string;
+    storyId: string;
+    organizationId: string;
+  },
+): Promise<NewsProducerServiceResult<AppliedProducerStoryPatch>> {
+  const kind = args.output.producer.kind;
+  const body = args.output.producer.body.trim();
+  if (!body) {
+    return { data: {}, error: null };
+  }
+
+  if (kind === "tv_script") {
+    const ensured = await ensureCurrentStoryScript(client, {
+      storyId: args.storyId,
+      organizationId: args.organizationId,
+      userId: args.userId,
+    });
+    if (ensured.error || !ensured.script) {
+      return {
+        data: null,
+        error: ensured.error ?? "Could not prepare story script.",
+      };
+    }
+
+    const contentHtml = plainTextToScriptHtml(body);
+    const contentPlain = body.replace(/\r\n/g, "\n").trim();
+    const saved = await saveCurrentStoryScript(client, args.userId, {
+      storyId: args.storyId,
+      contentHtml,
+      contentPlain,
+      wordCount: countWords(contentPlain),
+      characterCount: contentPlain.length,
+    });
+    if (saved.error || !saved.script) {
+      return {
+        data: null,
+        error: saved.error ?? "Could not write approved script.",
+      };
+    }
+
+    const approved = await approveStoryScript(client, {
+      storyId: args.storyId,
+      userId: args.userId,
+    });
+    if (approved.error || !approved.data) {
+      return {
+        data: null,
+        error: approved.error ?? "Script saved but approval failed.",
+      };
+    }
+
+    return {
+      data: {
+        story: approved.data,
+        script: {
+          contentHtml: saved.script.content_html,
+          contentPlain: saved.script.content_plain,
+          wordCount: saved.script.word_count,
+          characterCount: saved.script.character_count,
+          updatedAt: saved.script.updated_at,
+          version: saved.script.version,
+        },
+      },
+      error: null,
+    };
+  }
+
+  if (kind === "summary") {
+    const slots = parseSubHeadlineSlots(body);
+    const joined = joinSubHeadlineSlots(slots);
+    const primary = slots.find((slot) => slot.trim()) ?? "";
+    const media = serializeSubHeadlineMedia(
+      args.output.producer.subHeadlineMedia ?? [],
+    );
+    const { data, error } = await client
+      .from("stories")
+      .update({
+        summary: joined,
+        subtitle: primary || null,
+        sub_headline_media: media as unknown as Json,
+        updated_by: args.userId,
+      })
+      .eq("id", args.storyId)
+      .is("deleted_at", null)
+      .select("*")
+      .single();
+
+    if (error || !data) {
+      return {
+        data: null,
+        error: error?.message ?? "Could not update sub-headlines.",
+      };
+    }
+
+    return { data: { story: data as Story }, error: null };
+  }
+
+  return { data: {}, error: null };
 }
 
 export async function rejectProducerOutput(
@@ -283,15 +448,29 @@ export async function rejectProducerOutput(
 
 export async function saveProducerAsContentObject(
   client: Client,
-  args: { outputId: string; userId: string },
-): Promise<NewsProducerServiceResult<NewsProducerOutput>> {
-  // Explicit save: approve + ready (already a content_object row)
+  args: {
+    outputId: string;
+    userId: string;
+    storyId: string;
+    organizationId: string;
+  },
+): Promise<
+  NewsProducerServiceResult<
+    NewsProducerOutput & { applied?: AppliedProducerStoryPatch }
+  >
+> {
+  // Explicit save: approve + apply story fields
   return approveProducerOutput(client, args);
 }
 
 export async function updateProducerBody(
   client: Client,
-  args: { outputId: string; userId: string; body: string },
+  args: {
+    outputId: string;
+    userId: string;
+    body: string;
+    subHeadlineMedia?: SubHeadlineMediaRef[];
+  },
 ): Promise<NewsProducerServiceResult<NewsProducerOutput>> {
   const { data: current, error } = await client
     .from("content_objects")
@@ -313,6 +492,12 @@ export async function updateProducerBody(
     ...meta,
     body: args.body,
     approvalStatus: "waiting_for_approval",
+    subHeadlineMedia:
+      meta.kind === "summary"
+        ? serializeSubHeadlineMedia(
+            args.subHeadlineMedia ?? meta.subHeadlineMedia ?? [],
+          )
+        : undefined,
   };
 
   const updated = await updateContentObject(client, args.outputId, {

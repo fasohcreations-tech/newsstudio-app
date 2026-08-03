@@ -6,7 +6,28 @@
 export type StoryDataGeneral = {
   headline: string;
   subheadline: string;
+  /** Joined lower-info lines (derived from sub_headline_1..4). */
   summary: string;
+  /** Short lower-info slot 1 (primary rotating line). */
+  sub_headline_1: string;
+  sub_headline_2: string;
+  sub_headline_3: string;
+  sub_headline_4: string;
+  /** Per-slot media kind: image | video | caption | "". */
+  sub_headline_1_media_kind: string;
+  sub_headline_2_media_kind: string;
+  sub_headline_3_media_kind: string;
+  sub_headline_4_media_kind: string;
+  /** Per-slot media ref: library://uuid or URL. */
+  sub_headline_1_media: string;
+  sub_headline_2_media: string;
+  sub_headline_3_media: string;
+  sub_headline_4_media: string;
+  /** Caption body / overlay text per slot. */
+  sub_headline_1_caption: string;
+  sub_headline_2_caption: string;
+  sub_headline_3_caption: string;
+  sub_headline_4_caption: string;
   category: string;
   tags: string;
   priority: string;
@@ -53,6 +74,22 @@ export type StoryDataText = {
   headline: string;
   subheadline: string;
   summary: string;
+  sub_headline_1: string;
+  sub_headline_2: string;
+  sub_headline_3: string;
+  sub_headline_4: string;
+  sub_headline_1_media_kind: string;
+  sub_headline_2_media_kind: string;
+  sub_headline_3_media_kind: string;
+  sub_headline_4_media_kind: string;
+  sub_headline_1_media: string;
+  sub_headline_2_media: string;
+  sub_headline_3_media: string;
+  sub_headline_4_media: string;
+  sub_headline_1_caption: string;
+  sub_headline_2_caption: string;
+  sub_headline_3_caption: string;
+  sub_headline_4_caption: string;
   quote: string;
   bible_verse: string;
   verse_reference: string;

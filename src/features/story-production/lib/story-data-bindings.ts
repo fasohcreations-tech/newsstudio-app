@@ -4,15 +4,40 @@ import {
   STORY_FIELD_TO_BINDING,
 } from "@/features/story-production/constants/story-data.constants";
 import { isLibraryMediaRef } from "@/features/story-production/lib/library-media-reference";
+import {
+  collectSubHeadlineSlots,
+  joinSubHeadlineSlots,
+  parseSubHeadlineSlots,
+  SUB_HEADLINE_FIELD_KEYS,
+} from "@/features/story-production/lib/sub-headlines";
 import type { StoryDataRecord } from "@/features/story-production/types/story-data.types";
+
+/** Keep summary / primary subheadline in sync with the four lower-info slots. */
+export function syncSubHeadlineDerivedFields(
+  data: StoryDataRecord,
+): StoryDataRecord {
+  const slots = collectSubHeadlineSlots(data);
+  const joined = joinSubHeadlineSlots(slots);
+  const primary = slots.find((slot) => slot.trim()) ?? "";
+  return {
+    ...data,
+    sub_headline_1: slots[0] ?? "",
+    sub_headline_2: slots[1] ?? "",
+    sub_headline_3: slots[2] ?? "",
+    sub_headline_4: slots[3] ?? "",
+    summary: joined,
+    subheadline: primary || data.subheadline,
+  };
+}
 
 export function storyDataToBindings(
   data: StoryDataRecord,
 ): Record<string, string> {
+  const synced = syncSubHeadlineDerivedFields(data);
   const bindings: Record<string, string> = {};
 
   for (const [fieldKey, bindingKey] of Object.entries(STORY_FIELD_TO_BINDING)) {
-    const value = data[fieldKey as keyof StoryDataRecord];
+    const value = synced[fieldKey as keyof StoryDataRecord];
     if (value === undefined || value === null) continue;
 
     if (typeof value === "boolean") {
@@ -102,7 +127,18 @@ export function bindingsToStoryData(
     }
   }
 
-  return base;
+  const hasSlots = SUB_HEADLINE_FIELD_KEYS.some((key) =>
+    String(base[key] ?? "").trim(),
+  );
+  if (!hasSlots && base.summary) {
+    const slots = parseSubHeadlineSlots(base.summary);
+    base.sub_headline_1 = slots[0] ?? "";
+    base.sub_headline_2 = slots[1] ?? "";
+    base.sub_headline_3 = slots[2] ?? "";
+    base.sub_headline_4 = slots[3] ?? "";
+  }
+
+  return syncSubHeadlineDerivedFields(base);
 }
 
 export function resolveBindingMediaUrl(

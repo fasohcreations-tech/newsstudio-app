@@ -40,6 +40,9 @@ Fill `.env.local` with your Supabase project values from **Project Settings → 
 | `GEMINI_API_KEY` | No | Server-only Gemini key (`GOOGLE_AI_API_KEY` also accepted) |
 | `ANTHROPIC_API_KEY` | No | Server-only Anthropic Claude key |
 | `OLLAMA_BASE_URL` | No | Server-only Ollama endpoint (e.g. `http://127.0.0.1:11434`) |
+| `GOOGLE_CLOUD_TTS_CREDENTIALS` | No* | Service-account JSON for Google Cloud Text-to-Speech (*required for Voice Generation) |
+| `GOOGLE_APPLICATION_CREDENTIALS` | No | Alternate path to a GCP service-account JSON file |
+| `GOOGLE_CLOUD_PROJECT` | No | Optional GCP project id for TTS |
 
 Never commit `.env.local`. Only the anon key is used in the browser; all data access is enforced by Row Level Security.
 

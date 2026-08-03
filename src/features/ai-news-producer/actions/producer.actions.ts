@@ -28,10 +28,15 @@ import type {
   NewsProducerBundle,
   NewsProducerOutput,
 } from "@/features/ai-news-producer/types/producer.types";
+import type { AppliedProducerStoryPatch } from "@/features/ai-news-producer/services/news-producer.service";
 
 export type ProducerActionResult<T> =
   | { success: true; data: T }
   | { success: false; error: string };
+
+export type ApproveProducerActionData = NewsProducerOutput & {
+  applied?: AppliedProducerStoryPatch;
+};
 
 async function requireOrg() {
   const user = await requireAuth();
@@ -162,7 +167,7 @@ export async function runNewsProducerAction(
 export async function approveNewsProducerOutputAction(
   outputId: string,
   storyId: string,
-): Promise<ProducerActionResult<NewsProducerOutput>> {
+): Promise<ProducerActionResult<ApproveProducerActionData>> {
   const { user, supabase, membership, error } = await requireOrg();
   if (!membership) {
     return { success: false, error: error ?? "Organization required." };
@@ -171,6 +176,8 @@ export async function approveNewsProducerOutputAction(
   const result = await approveProducerOutput(supabase, {
     outputId,
     userId: user.id,
+    storyId,
+    organizationId: membership.organization.id,
   });
   if (result.error || !result.data) {
     return { success: false, error: result.error ?? "Approve failed." };
@@ -203,6 +210,7 @@ export async function updateNewsProducerOutputAction(args: {
   outputId: string;
   storyId: string;
   body: string;
+  subHeadlineMedia?: import("@/features/story-production/lib/sub-headlines").SubHeadlineMediaRef[];
 }): Promise<ProducerActionResult<NewsProducerOutput>> {
   const { user, supabase, membership, error } = await requireOrg();
   if (!membership) {
@@ -213,6 +221,7 @@ export async function updateNewsProducerOutputAction(args: {
     outputId: args.outputId,
     userId: user.id,
     body: args.body,
+    subHeadlineMedia: args.subHeadlineMedia,
   });
   if (result.error || !result.data) {
     return { success: false, error: result.error ?? "Update failed." };
@@ -265,7 +274,7 @@ export async function regenerateNewsProducerOutputAction(
 export async function saveNewsProducerContentObjectAction(
   outputId: string,
   storyId: string,
-): Promise<ProducerActionResult<NewsProducerOutput>> {
+): Promise<ProducerActionResult<ApproveProducerActionData>> {
   const { user, supabase, membership, error } = await requireOrg();
   if (!membership) {
     return { success: false, error: error ?? "Organization required." };
@@ -274,6 +283,8 @@ export async function saveNewsProducerContentObjectAction(
   const result = await saveProducerAsContentObject(supabase, {
     outputId,
     userId: user.id,
+    storyId,
+    organizationId: membership.organization.id,
   });
   if (result.error || !result.data) {
     return { success: false, error: result.error ?? "Save failed." };

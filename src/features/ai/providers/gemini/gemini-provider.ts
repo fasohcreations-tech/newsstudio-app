@@ -19,6 +19,8 @@ import {
   type AIProviderId,
   type CostEstimate,
   type CostEstimateInput,
+  type GenerateImageInput,
+  type GenerateImageResult,
   type GenerateTextInput,
   type GenerateTextResult,
   type ProviderHealth,
@@ -44,6 +46,73 @@ export class GeminiProvider extends BaseAIProvider {
 
   private client(): GoogleGenAI {
     return createGeminiClient();
+  }
+
+  async generateImage(input: GenerateImageInput): Promise<GenerateImageResult> {
+    this.assertConfigured();
+    const model =
+      input.model?.trim() ||
+      process.env.DEFAULT_GEMINI_IMAGE_MODEL?.trim() ||
+      "gemini-2.5-flash-image";
+    const prompt = input.prompt?.trim();
+    if (!prompt) {
+      throw new AIProviderError("Prompt is required.", this.id, "provider_error");
+    }
+
+    const timeoutMs = 90_000;
+
+    try {
+      const response = await withTimeout(
+        this.client().models.generateContent({
+          model,
+          contents: prompt,
+          config: {
+            responseModalities: ["TEXT", "IMAGE"],
+          },
+        }),
+        timeoutMs,
+        "Gemini generateImage",
+      );
+
+      const images: Array<{ url?: string; b64?: string }> = [];
+      const parts =
+        (
+          response as {
+            candidates?: Array<{
+              content?: { parts?: Array<Record<string, unknown>> };
+            }>;
+          }
+        ).candidates?.[0]?.content?.parts ?? [];
+
+      for (const part of parts) {
+        const inline =
+          (part.inlineData as
+            | { data?: string; mimeType?: string }
+            | undefined) ??
+          (part.inline_data as
+            | { data?: string; mimeType?: string }
+            | undefined);
+        if (inline?.data) {
+          images.push({ b64: inline.data });
+        }
+      }
+
+      if (images.length === 0) {
+        throw new AIProviderError(
+          "Gemini returned no image data. Try a more visual prompt.",
+          this.id,
+          "provider_error",
+        );
+      }
+
+      return {
+        images: images.slice(0, input.n ?? 1),
+        model,
+        raw: sanitizeRaw(response),
+      };
+    } catch (error) {
+      throw mapGeminiError(error);
+    }
   }
 
   async generateText(input: GenerateTextInput): Promise<GenerateTextResult> {
@@ -234,8 +303,17 @@ export class GeminiProvider extends BaseAIProvider {
   }
 
   async estimateCost(input: CostEstimateInput): Promise<CostEstimate> {
-    // Placeholder rates for gemini-3.5-flash (USD per 1M tokens) — approximate.
     const model = input.model ?? this.defaultModel;
+    if (input.modality === "image") {
+      // Placeholder per-image estimate for Gemini image models.
+      const perImage = model.toLowerCase().includes("pro") ? 0.04 : 0.02;
+      const count = Math.max(1, Math.ceil(input.outputTokens / 1000) || 1);
+      return {
+        currency: "USD",
+        estimatedCost: Number((perImage * count).toFixed(4)),
+        breakdown: `Placeholder image estimate for ${model} (~$${perImage}/image)`,
+      };
+    }
     const rates = resolvePlaceholderRates(model);
     const estimatedCost =
       (input.inputTokens / 1_000_000) * rates.in +

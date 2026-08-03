@@ -40,10 +40,13 @@ import type { StoryDataRecord } from "@/features/story-production/types/story-da
 type PropertyInspectorPanelProps = {
   selectedObject: SceneObject | null;
   data: StoryDataRecord;
+  organizationId?: string | null;
+  storyId?: string | null;
   onFieldChange: <K extends keyof StoryDataRecord>(
     key: K,
     value: StoryDataRecord[K],
   ) => void;
+  onFieldsPatch?: (patch: Partial<StoryDataRecord>) => void;
   onObjectPatch: (id: string, patch: Partial<SceneObject>) => void;
   onClearSelection: () => void;
   onBrowseMedia?: () => void;
@@ -129,7 +132,10 @@ function Field({
 export function PropertyInspectorPanel({
   selectedObject,
   data,
+  organizationId,
+  storyId,
   onFieldChange,
+  onFieldsPatch,
   onObjectPatch,
   onClearSelection,
   onBrowseMedia,
@@ -451,7 +457,13 @@ export function PropertyInspectorPanel({
 
         <TabsContent value="story" className="min-h-0 flex-1">
           {tab === "story" ? (
-            <StoryDataFormPanel data={data} onFieldChange={onFieldChange} />
+            <StoryDataFormPanel
+              data={data}
+              organizationId={organizationId}
+              storyId={storyId}
+              onFieldChange={onFieldChange}
+              onFieldsPatch={onFieldsPatch}
+            />
           ) : null}
         </TabsContent>
       </Tabs>

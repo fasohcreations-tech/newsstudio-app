@@ -69,14 +69,15 @@ export async function assessBroadcastHealth(
     userId: input.userId,
     storyId: input.storyId ?? undefined,
     jobType: INTELLIGENCE_JOB_TYPES.broadcastHealth,
-    systemPrompt:
-      "You are MediaOS Broadcast Intelligence. Recommend broadcast delivery settings. Return JSON only. Never claim to have changed the playout chain.",
-    prompt: `Target bitrate: ${input.targetBitrateKbps ?? 4500} kbps
+    promptId: "intelligence.broadcast",
+    promptVariables: {
+      context_block: `Target bitrate: ${input.targetBitrateKbps ?? 4500} kbps
 Resolution: ${input.resolution ?? "1920x1080"}
 Has subtitles: ${input.hasSubtitles ? "yes" : "no"}
 
 Return JSON:
 { bitrateKbps: number, audioLevelDbfs: number, safeTitleOk: boolean, subtitleReadable: boolean, streamQuality: "excellent"|"good"|"fair"|"poor", issues: string[], recommendations: string[], confidence: number }`,
+    },
   });
 
   if (live.data?.text) {

@@ -184,9 +184,12 @@ export async function runStoryIntelligence(
     userId: ctx.userId,
     storyId: ctx.storyId ?? undefined,
     jobType: meta.jobType,
-    systemPrompt:
-      "You are MediaOS Story Intelligence. Return JSON only. Never claim to have published or overwritten the story.",
-    prompt: `${meta.instruction}\n\nTarget language: ${ctx.targetLanguage ?? ctx.language ?? "en"}\n\nSOURCE:\n${sourceText.slice(0, 12_000)}`,
+    promptId: "intelligence.story",
+    promptVariables: {
+      instruction: meta.instruction,
+      target_language: ctx.targetLanguage ?? ctx.language ?? "en",
+      source_text: sourceText.slice(0, 12_000) || "(empty)",
+    },
   });
 
   let payload = heuristicPayload(capability, ctx);

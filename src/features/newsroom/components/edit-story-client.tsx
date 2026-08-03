@@ -22,6 +22,7 @@ export function EditStoryClient({ story }: EditStoryClientProps) {
       title: values.title,
       subtitle: values.subtitle,
       summary: values.summary,
+      sub_headline_media: values.sub_headline_media,
       status: values.status,
       priority: values.priority,
       category: values.category,

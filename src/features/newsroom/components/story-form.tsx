@@ -8,7 +8,6 @@ import { Loader2 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
-import { Textarea } from "@/components/ui/textarea";
 import {
   Select,
   SelectContent,
@@ -29,6 +28,15 @@ import {
   type StoryFormInput,
 } from "@/features/newsroom/schemas/story.schemas";
 import type { Story } from "@/features/newsroom/types/story.types";
+import { SubHeadlineSlotsEditor } from "@/features/story-production/components/form/sub-headline-slots-editor";
+import {
+  emptySubHeadlineMediaSlots,
+  joinSubHeadlineSlots,
+  parseSubHeadlineMedia,
+  parseSubHeadlineSlots,
+  serializeSubHeadlineMedia,
+  type SubHeadlineMediaRef,
+} from "@/features/story-production/lib/sub-headlines";
 
 type StoryFormProps = {
   organizationId: string;
@@ -52,6 +60,9 @@ export function StoryForm({
           title: initialStory.title,
           subtitle: initialStory.subtitle ?? "",
           summary: initialStory.summary ?? "",
+          sub_headline_media: parseSubHeadlineMedia(
+            initialStory.sub_headline_media,
+          ),
           status: initialStory.status,
           priority: initialStory.priority,
           category: initialStory.category ?? "",
@@ -61,6 +72,7 @@ export function StoryForm({
       : {
           ...storyFormDefaults,
           organization_id: organizationId,
+          sub_headline_media: emptySubHeadlineMediaSlots(),
         },
   });
 
@@ -72,10 +84,19 @@ export function StoryForm({
     formState: { errors, isSubmitting },
   } = form;
 
+  const summary = watch("summary") ?? "";
+  const mediaSlots =
+    watch("sub_headline_media") ?? emptySubHeadlineMediaSlots();
+
   async function submit(values: StoryFormInput) {
     setFormError(null);
     try {
-      await onSubmit(values);
+      await onSubmit({
+        ...values,
+        sub_headline_media: serializeSubHeadlineMedia(
+          values.sub_headline_media ?? emptySubHeadlineMediaSlots(),
+        ),
+      });
     } catch (error) {
       setFormError(
         error instanceof Error ? error.message : "Unable to save story.",
@@ -105,8 +126,30 @@ export function StoryForm({
       </div>
 
       <div className="space-y-2">
-        <Label htmlFor="summary">Summary</Label>
-        <Textarea id="summary" rows={5} {...register("summary")} />
+        <Label>Sub Headlines</Label>
+        <SubHeadlineSlotsEditor
+          texts={parseSubHeadlineSlots(summary)}
+          media={mediaSlots}
+          organizationId={organizationId}
+          storyId={initialStory?.id}
+          onTextsChange={(texts) => {
+            setValue("summary", joinSubHeadlineSlots(texts), {
+              shouldDirty: true,
+              shouldValidate: true,
+            });
+          }}
+          onMediaChange={(media: SubHeadlineMediaRef[]) => {
+            setValue("sub_headline_media", serializeSubHeadlineMedia(media), {
+              shouldDirty: true,
+              shouldValidate: true,
+            });
+          }}
+        />
+        {errors.summary ? (
+          <p className="text-sm text-destructive" role="alert">
+            {errors.summary.message}
+          </p>
+        ) : null}
       </div>
 
       <div className="grid gap-4 sm:grid-cols-2">
@@ -177,7 +220,10 @@ export function StoryForm({
             value={watch("language") || "ml"}
             onValueChange={(value) => {
               if (!value) return;
-              setValue("language", value, { shouldDirty: true, shouldValidate: true });
+              setValue("language", value, {
+                shouldDirty: true,
+                shouldValidate: true,
+              });
             }}
           >
             <SelectTrigger id="language" className="w-full">

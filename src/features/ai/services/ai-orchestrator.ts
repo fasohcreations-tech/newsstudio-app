@@ -15,6 +15,7 @@ import {
   type AIProviderId,
   type CostEstimate,
   type CostEstimateInput,
+  type GenerateImageResult,
   type GenerateTextResult,
   type OrchestratorResult,
   type OrchestratorTextRequest,
@@ -22,6 +23,11 @@ import {
 } from "@/features/ai/types/ai";
 
 type Client = SupabaseClient<Database>;
+
+export type OrchestratorImageRequest = OrchestratorTextRequest & {
+  size?: string;
+  n?: number;
+};
 
 /**
  * AI Orchestrator — single entry point for all MediaOS AI calls.
@@ -108,36 +114,56 @@ export async function generateText(
     settings.preferredModel ??
     provider.defaultModel;
 
-  let promptText = request.prompt ?? "";
+  let promptText = "";
+  let systemText: string | undefined;
   let promptMeta: Record<string, string> | null = null;
 
-  if (request.promptId) {
-    try {
-      const rendered = renderPrompt(
-        request.promptId,
-        request.promptVariables ?? {},
+  if (!request.promptId?.trim()) {
+    return {
+      jobId: null,
+      data: null,
+      error:
+        "A Prompt Manager promptId is required. Register prompts under src/features/ai/prompts.",
+    };
+  }
+
+  try {
+    const rendered = renderPrompt(
+      request.promptId,
+      request.promptVariables ?? {},
+      request.locale ?? "en",
+    );
+    promptText = rendered.text;
+    systemText = rendered.systemText;
+    promptMeta = {
+      promptId: rendered.promptId,
+      promptVersion: rendered.promptVersion,
+      locale: rendered.locale,
+    };
+
+    if (request.systemPromptId) {
+      const systemRendered = renderPrompt(
+        request.systemPromptId,
+        request.systemPromptVariables ?? request.promptVariables ?? {},
         request.locale ?? "en",
       );
-      promptText = rendered.text;
-      promptMeta = {
-        promptId: rendered.promptId,
-        promptVersion: rendered.promptVersion,
-        locale: rendered.locale,
-      };
-    } catch (error) {
-      return {
-        jobId: null,
-        data: null,
-        error: error instanceof Error ? error.message : "Prompt render failed",
-      };
+      systemText = systemRendered.text;
+      promptMeta.systemPromptId = systemRendered.promptId;
+      promptMeta.systemPromptVersion = systemRendered.promptVersion;
     }
+  } catch (error) {
+    return {
+      jobId: null,
+      data: null,
+      error: error instanceof Error ? error.message : "Prompt render failed",
+    };
   }
 
   if (!promptText.trim()) {
     return {
       jobId: null,
       data: null,
-      error: "A prompt or promptId is required.",
+      error: "Rendered prompt is empty.",
     };
   }
 
@@ -151,7 +177,7 @@ export async function generateText(
 
   const requestPayload: Json = {
     prompt: promptText,
-    systemPrompt: request.systemPrompt ?? null,
+    systemPrompt: systemText ?? null,
     temperature,
     topP,
     topK,
@@ -192,7 +218,7 @@ export async function generateText(
     try {
       const data = await provider.generateText({
         prompt: promptText,
-        systemPrompt: request.systemPrompt,
+        systemPrompt: systemText,
         model,
         temperature,
         topP,
@@ -225,6 +251,175 @@ export async function generateText(
       lastError = error;
       const retryable = isRetryableError(error);
       console.error("[AIOrchestrator] generateText attempt failed", {
+        jobId,
+        providerId,
+        attempt,
+        retryable,
+        message: toErrorMessage(error),
+      });
+      if (!retryable || attempt >= attempts) break;
+      await sleep(250 * attempt);
+    }
+  }
+
+  const processingTimeMs = Date.now() - started;
+  const message = toErrorMessage(lastError);
+  await AIJobManager.markJobFailed(
+    client,
+    jobId,
+    request.userId,
+    message,
+    processingTimeMs,
+  );
+  return { jobId, data: null, error: message };
+}
+
+/**
+ * Image generation through the orchestrator (Gemini image models).
+ * Records tokens/cost on ai_jobs the same way as text generation.
+ */
+export async function generateImage(
+  client: Client,
+  request: OrchestratorImageRequest,
+): Promise<OrchestratorResult<GenerateImageResult & { tokensUsed?: number; estimatedCost?: number }>> {
+  validateOrchestratorRequest(request);
+
+  const { settings, error: settingsError } = await getAIOrgSettings(
+    client,
+    request.organizationId,
+  );
+  if (settingsError) {
+    console.error("[AIOrchestrator] settings load failed", settingsError);
+  }
+
+  const providerId = request.providerId ?? settings.defaultProvider;
+  const providerToggle = settings.providers[providerId];
+  if (!providerToggle?.enabled) {
+    return {
+      jobId: null,
+      data: null,
+      error: `Provider ${providerId} is disabled in AI settings.`,
+    };
+  }
+
+  const provider = getAIProvider(providerId);
+  const model =
+    request.model ??
+    process.env.DEFAULT_GEMINI_IMAGE_MODEL?.trim() ??
+    "gemini-2.5-flash-image";
+
+  if (!request.promptId?.trim()) {
+    return {
+      jobId: null,
+      data: null,
+      error:
+        "A Prompt Manager promptId is required for image generation.",
+    };
+  }
+
+  let promptText = "";
+  let promptMeta: Record<string, string> | null = null;
+  try {
+    const rendered = renderPrompt(
+      request.promptId,
+      request.promptVariables ?? {},
+      request.locale ?? "en",
+    );
+    promptText = rendered.text.trim();
+    promptMeta = {
+      promptId: rendered.promptId,
+      promptVersion: rendered.promptVersion,
+      locale: rendered.locale,
+    };
+  } catch (error) {
+    return {
+      jobId: null,
+      data: null,
+      error: error instanceof Error ? error.message : "Prompt render failed",
+    };
+  }
+
+  if (!promptText) {
+    return { jobId: null, data: null, error: "Rendered prompt is empty." };
+  }
+
+  const timeoutMs = Math.max(
+    settings.timeoutMs || getDefaultAIRequestTimeoutMs() || 60_000,
+    90_000,
+  );
+  const retryCount = Math.max(0, settings.retryCount ?? 0);
+
+  const enqueued = await AIJobManager.enqueueJob(client, {
+    organizationId: request.organizationId,
+    userId: request.userId,
+    storyId: request.storyId ?? null,
+    contentObjectId: request.contentObjectId,
+    provider: providerId,
+    model,
+    jobType: request.jobType,
+    request: {
+      prompt: promptText,
+      size: request.size ?? null,
+      n: request.n ?? 1,
+      modality: "image",
+      ...(promptMeta ?? {}),
+      variables: request.promptVariables ?? null,
+    },
+  });
+
+  if (enqueued.error || !enqueued.job) {
+    return {
+      jobId: null,
+      data: null,
+      error: enqueued.error ?? "Unable to enqueue AI job.",
+    };
+  }
+
+  const jobId = enqueued.job.id;
+  const started = Date.now();
+  await AIJobManager.markJobRunning(client, jobId, request.userId);
+
+  const attempts = retryCount + 1;
+  let lastError: unknown = null;
+
+  for (let attempt = 1; attempt <= attempts; attempt++) {
+    try {
+      const data = await provider.generateImage({
+        prompt: promptText,
+        model,
+        size: request.size,
+        n: request.n ?? 1,
+      });
+
+      const processingTimeMs = Date.now() - started;
+      const promptTokens = Math.ceil(promptText.length / 4);
+      const tokensUsed = Math.max(promptTokens, 1200);
+      const cost = await provider.estimateCost({
+        model,
+        inputTokens: promptTokens,
+        outputTokens: 1000,
+        modality: "image",
+      });
+
+      await AIJobManager.markJobSucceeded(client, jobId, request.userId, {
+        response: {
+          imageCount: data.images.length,
+          attempt,
+        },
+        tokensUsed,
+        cost: cost.estimatedCost,
+        processingTimeMs,
+      });
+
+      return {
+        jobId,
+        data: { ...data, tokensUsed, estimatedCost: cost.estimatedCost },
+        error: null,
+      };
+    } catch (error) {
+      lastError = error;
+      const retryable = isRetryableError(error);
+      console.error("[AIOrchestrator] generateImage attempt failed", {
         jobId,
         providerId,
         attempt,

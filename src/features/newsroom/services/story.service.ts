@@ -1,6 +1,6 @@
 import type { SupabaseClient } from "@supabase/supabase-js";
 
-import type { Database, StoryPriority, StoryStatus } from "@/shared/types/database.types";
+import type { Database, Json, StoryPriority, StoryStatus } from "@/shared/types/database.types";
 import type {
   StoryCreateInput,
   StoryUpdateInput,
@@ -16,6 +16,7 @@ import {
   type StorySortOption,
 } from "@/features/newsroom/constants/story.constants";
 import { uniqueSlug } from "@/features/newsroom/lib/story-utils";
+import { serializeSubHeadlineMedia } from "@/features/story-production/lib/sub-headlines";
 
 type Client = SupabaseClient<Database>;
 
@@ -177,6 +178,13 @@ export async function createStory(
     title: input.title.trim(),
     subtitle: input.subtitle?.trim() || null,
     summary: input.summary?.trim() || null,
+    ...(input.sub_headline_media
+      ? {
+          sub_headline_media: serializeSubHeadlineMedia(
+            input.sub_headline_media,
+          ) as unknown as Json,
+        }
+      : {}),
     status: input.status as StoryStatus,
     priority: input.priority as StoryPriority,
     category: input.category?.trim() || null,
@@ -211,6 +219,13 @@ export async function updateStory(
     title: input.title.trim(),
     subtitle: input.subtitle?.trim() || null,
     summary: input.summary?.trim() || null,
+    ...(input.sub_headline_media
+      ? {
+          sub_headline_media: serializeSubHeadlineMedia(
+            input.sub_headline_media,
+          ) as unknown as Json,
+        }
+      : {}),
     status: input.status as StoryStatus,
     priority: input.priority as StoryPriority,
     category: input.category?.trim() || null,

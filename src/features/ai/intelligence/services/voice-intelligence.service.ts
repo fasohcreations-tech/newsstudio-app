@@ -84,9 +84,12 @@ export async function runVoiceIntelligence(
     userId: input.userId,
     storyId: input.storyId ?? undefined,
     jobType: meta.jobType,
-    systemPrompt:
-      "You are MediaOS Voice Intelligence. Return JSON only. Never overwrite editor content.",
-    prompt: `${meta.instruction}\nLanguage hint: ${input.languageHint ?? "auto"}\n\nTEXT:\n${text.slice(0, 10_000)}`,
+    promptId: "intelligence.voice",
+    promptVariables: {
+      instruction: meta.instruction,
+      language_hint: input.languageHint ?? "auto",
+      source_text: text.slice(0, 10_000) || "(empty)",
+    },
   });
 
   let payload: Record<string, unknown> = {

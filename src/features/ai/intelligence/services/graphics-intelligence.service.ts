@@ -70,13 +70,14 @@ export async function recommendGraphics(
     userId: input.userId,
     storyId: input.storyId ?? undefined,
     jobType: INTELLIGENCE_JOB_TYPES.graphicsRecommend,
-    systemPrompt:
-      "You are MediaOS Graphics Intelligence. Recommend broadcast graphics styling. Return JSON only.",
-    prompt: `Story category: ${category}
+    promptId: "intelligence.graphics",
+    promptVariables: {
+      context_block: `Story category: ${category}
 Language: ${input.language ?? "en"}
 
 Return JSON:
 { themes: string[], colorPalettes: Array<{ name: string, colors: string[] }>, typography: Array<{ role: string, suggestion: string }>, shapeBehaviors: string[], motionPresets: string[], confidence: number, rationale: string }`,
+    },
   });
 
   if (live.data?.text) {

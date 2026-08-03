@@ -71,14 +71,15 @@ export async function analyzeAsset(
     userId: input.userId,
     storyId: input.storyId ?? undefined,
     jobType: INTELLIGENCE_JOB_TYPES.assetAnalyze,
-    systemPrompt:
-      "You are MediaOS Asset Intelligence. Analyze media metadata for newsroom search. Return JSON only. Do not invent faces you cannot verify.",
-    prompt: `Asset name: ${input.name}
+    promptId: "intelligence.asset",
+    promptVariables: {
+      context_block: `Asset name: ${input.name}
 File type: ${input.fileType}
 MIME: ${input.mimeType}
 
 Return JSON:
 { tags: string[], categories: string[], description: string, ocrText?: string, faces?: Array<{ label: string, confidence: number }>, duplicateOfAssetId?: string | null, searchableText: string, confidence: number }`,
+    },
   });
 
   let payload: AssetAnalysisPayload = heuristic;

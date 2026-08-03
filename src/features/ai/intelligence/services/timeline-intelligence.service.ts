@@ -119,9 +119,9 @@ export async function generateTimelineDraft(
     userId: input.userId,
     storyId: input.storyId ?? undefined,
     jobType,
-    systemPrompt:
-      "You are MediaOS Timeline Intelligence. Produce editable timeline drafts using existing scene templates only. Never produce or imply a rendered video file. Return JSON only.",
-    prompt: `Story: ${input.storyTitle ?? "Untitled"}
+    promptId: "intelligence.timeline",
+    promptVariables: {
+      context_block: `Story: ${input.storyTitle ?? "Untitled"}
 Type: ${input.storyType ?? "news"}
 ${input.sceneIndex != null ? `Regenerate only scene index ${input.sceneIndex}.` : ""}
 ${input.regenerateAll ? "Regenerate the entire timeline draft." : ""}
@@ -131,6 +131,7 @@ ${catalog || "(none)"}
 
 Return JSON matching:
 { title: string, durationMs: number, scenes: Array<{ sceneId?: string, sceneName: string, sceneType?: string, startMs: number, durationMs: number, aiGenerated: true, notes?: string }>, rationale: string, regeneratable: true, confidence: number }`,
+    },
   });
 
   let confidence = 0.55;

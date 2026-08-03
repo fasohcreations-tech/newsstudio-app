@@ -142,6 +142,135 @@ export async function listRecentJobs(
   return { jobs: data ?? [], error: null };
 }
 
+export type TokenUsageLogFilters = {
+  organizationId: string;
+  page?: number;
+  pageSize?: number;
+  status?: AiJobStatus | "all";
+  provider?: string | "all";
+  jobType?: string | "all";
+  /** ISO date (inclusive start of day) */
+  from?: string | null;
+  /** ISO date (inclusive end of day) */
+  to?: string | null;
+  /** Only rows with tokens_used > 0 */
+  tokensOnly?: boolean;
+};
+
+export type TokenUsageLogResult = {
+  jobs: AiJob[];
+  total: number;
+  page: number;
+  pageSize: number;
+  stats: AIUsageStats;
+};
+
+function applyUsageFilters(
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  query: any,
+  filters: TokenUsageLogFilters,
+) {
+  let next = query.eq("organization_id", filters.organizationId);
+
+  if (filters.status && filters.status !== "all") {
+    next = next.eq("status", filters.status);
+  }
+  if (filters.provider && filters.provider !== "all") {
+    next = next.eq("provider", filters.provider);
+  }
+  if (filters.jobType && filters.jobType !== "all") {
+    next = next.eq("job_type", filters.jobType);
+  }
+  if (filters.from) {
+    next = next.gte("created_at", filters.from);
+  }
+  if (filters.to) {
+    next = next.lte("created_at", filters.to);
+  }
+  if (filters.tokensOnly) {
+    next = next.gt("tokens_used", 0);
+  }
+  return next;
+}
+
+/**
+ * Paginated AI token / cost ledger for the organization.
+ */
+export async function listTokenUsageLog(
+  client: Client,
+  filters: TokenUsageLogFilters,
+): Promise<{ data: TokenUsageLogResult | null; error: string | null }> {
+  const page = Math.max(1, filters.page ?? 1);
+  const pageSize = Math.min(100, Math.max(10, filters.pageSize ?? 25));
+  const from = (page - 1) * pageSize;
+  const to = from + pageSize - 1;
+
+  const listQuery = applyUsageFilters(
+    client
+      .from("ai_jobs")
+      .select(AI_JOB_SELECT, { count: "exact" })
+      .order("created_at", { ascending: false })
+      .range(from, to),
+    filters,
+  );
+
+  const statsQuery = applyUsageFilters(
+    client.from("ai_jobs").select("status, tokens_used, cost"),
+    filters,
+  );
+
+  const [listResult, statsResult] = await Promise.all([listQuery, statsQuery]);
+
+  if (listResult.error) {
+    return { data: null, error: listResult.error.message };
+  }
+  if (statsResult.error) {
+    return { data: null, error: statsResult.error.message };
+  }
+
+  const stats = emptyStats();
+  for (const row of statsResult.data ?? []) {
+    stats.totalJobs += 1;
+    const status = row.status as AiJobStatus;
+    if (status === "queued") stats.queued += 1;
+    else if (status === "running") stats.running += 1;
+    else if (status === "succeeded") stats.succeeded += 1;
+    else if (status === "failed") stats.failed += 1;
+    else if (status === "cancelled") stats.cancelled += 1;
+    stats.tokensUsed += row.tokens_used ?? 0;
+    stats.estimatedCost += Number(row.cost ?? 0);
+  }
+  stats.estimatedCost = Number(stats.estimatedCost.toFixed(6));
+
+  return {
+    data: {
+      jobs: (listResult.data as AiJob[]) ?? [],
+      total: listResult.count ?? 0,
+      page,
+      pageSize,
+      stats,
+    },
+    error: null,
+  };
+}
+
+/** Distinct job_type values for filter dropdowns. */
+export async function listJobTypesForOrg(
+  client: Client,
+  organizationId: string,
+): Promise<{ jobTypes: string[]; error: string | null }> {
+  const { data, error } = await client
+    .from("ai_jobs")
+    .select("job_type")
+    .eq("organization_id", organizationId)
+    .order("job_type", { ascending: true })
+    .limit(500);
+
+  if (error) return { jobTypes: [], error: error.message };
+  const unique = [...new Set((data ?? []).map((row) => row.job_type).filter(Boolean))];
+  return { jobTypes: unique, error: null };
+}
+
 export async function getUsageStats(
   client: Client,
   organizationId: string,

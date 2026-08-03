@@ -1,5 +1,6 @@
 "use client";
 
+import dynamic from "next/dynamic";
 import { useCallback, useEffect, useMemo, useState, useTransition } from "react";
 import {
   Check,
@@ -15,8 +16,9 @@ import { toast } from "sonner";
 
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
+import { Input } from "@/components/ui/input";
+import { Skeleton } from "@/components/ui/skeleton";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
-import { Textarea } from "@/components/ui/textarea";
 import {
   NEWS_PRODUCER_ACTIONS,
   NEWS_PRODUCER_APPROVAL_LABELS,
@@ -25,6 +27,7 @@ import {
   NEWS_PRODUCER_SECTION_LABELS,
   NEWS_PRODUCER_SECTIONS,
   type NewsProducerActionId,
+  type NewsProducerKind,
   type NewsProducerSection,
 } from "@/features/ai-news-producer/constants/producer.constants";
 import {
@@ -35,29 +38,92 @@ import {
   runNewsProducerAction,
   saveNewsProducerContentObjectAction,
   updateNewsProducerOutputAction,
+  type ApproveProducerActionData,
 } from "@/features/ai-news-producer/actions/producer.actions";
+import { ProducerMediaGeneratePanel } from "@/features/ai-news-producer/components/producer-media-generate-panel";
 import type { NewsProducerOutput } from "@/features/ai-news-producer/types/producer.types";
+import type { StoryWithRelations } from "@/features/newsroom/types/story.types";
+import { SubHeadlineSlotsEditor } from "@/features/story-production/components/form/sub-headline-slots-editor";
+import {
+  joinSubHeadlineSlots,
+  parseSubHeadlineMedia,
+  parseSubHeadlineSlots,
+  type SubHeadlineMediaRef,
+} from "@/features/story-production/lib/sub-headlines";
 import { cn } from "@/lib/utils";
 
+const MediaOSEditor = dynamic(
+  () =>
+    import("@/features/smart-editor/components/mediaos-editor").then(
+      (m) => m.MediaOSEditor,
+    ),
+  {
+    ssr: false,
+    loading: () => <Skeleton className="h-48 w-full" />,
+  },
+);
+
+const StoryMediaPanel = dynamic(
+  () =>
+    import("@/features/media/components/story-media-panel").then(
+      (m) => m.StoryMediaPanel,
+    ),
+  {
+    ssr: false,
+    loading: () => <Skeleton className="h-48 w-full" />,
+  },
+);
+
+type AppliedScriptPatch = NonNullable<
+  ApproveProducerActionData["applied"]
+>["script"];
+
 type AiNewsProducerTabProps = {
-  storyId: string;
-  storyTitle: string;
+  story: StoryWithRelations;
+  initialSection?: NewsProducerSection;
+  onStoryUpdated?: (story: StoryWithRelations) => void;
+  onScriptApplied?: (script: NonNullable<AppliedScriptPatch>) => void;
 };
 
+function plainToEditorHtml(plain: string): string {
+  const escaped = plain
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;");
+  const blocks = escaped
+    .split(/\n{2,}/)
+    .map((block) => block.trim())
+    .filter(Boolean);
+  if (blocks.length === 0) return "<p></p>";
+  return blocks
+    .map((block) => `<p>${block.replace(/\n/g, "<br>")}</p>`)
+    .join("");
+}
+
+function usesManglishEditor(kind: NewsProducerKind): boolean {
+  return kind !== "summary";
+}
+
 export function AiNewsProducerTab({
-  storyId,
-  storyTitle,
+  story,
+  initialSection = "research",
+  onStoryUpdated,
+  onScriptApplied,
 }: AiNewsProducerTabProps) {
-  const [section, setSection] = useState<NewsProducerSection>("research");
+  const [section, setSection] = useState<NewsProducerSection>(initialSection);
   const [outputs, setOutputs] = useState<NewsProducerOutput[]>([]);
   const [loadError, setLoadError] = useState<string | null>(null);
   const [editingId, setEditingId] = useState<string | null>(null);
   const [draft, setDraft] = useState("");
   const [pending, startTransition] = useTransition();
 
+  useEffect(() => {
+    if (initialSection) setSection(initialSection);
+  }, [initialSection]);
+
   const refresh = useCallback(() => {
     startTransition(async () => {
-      const result = await getNewsProducerBundleAction(storyId);
+      const result = await getNewsProducerBundleAction(story.id);
       if (!result.success) {
         setLoadError(result.error);
         return;
@@ -65,7 +131,7 @@ export function AiNewsProducerTab({
       setLoadError(null);
       setOutputs(result.data.outputs);
     });
-  }, [storyId]);
+  }, [story.id]);
 
   useEffect(() => {
     refresh();
@@ -85,7 +151,6 @@ export function AiNewsProducerTab({
     setOutputs((prev) => {
       const map = new Map(prev.map((o) => [o.id, o]));
       for (const item of next) map.set(item.id, item);
-      // Also replace by kind when regenerate reuses same id or new id of same kind
       for (const item of next) {
         for (const [id, existing] of map) {
           if (
@@ -103,9 +168,19 @@ export function AiNewsProducerTab({
     });
   }
 
+  function applyApprovedResult(result: ApproveProducerActionData) {
+    upsertOutputs([result]);
+    if (result.applied?.story) {
+      onStoryUpdated?.(result.applied.story as StoryWithRelations);
+    }
+    if (result.applied?.script) {
+      onScriptApplied?.(result.applied.script);
+    }
+  }
+
   function runAction(actionId: NewsProducerActionId) {
     startTransition(async () => {
-      const result = await runNewsProducerAction(storyId, actionId);
+      const result = await runNewsProducerAction(story.id, actionId);
       if (!result.success) {
         toast.error(result.error);
         return;
@@ -123,9 +198,9 @@ export function AiNewsProducerTab({
           AI News Producer
         </h2>
         <p className="text-sm text-muted-foreground">
-          “{storyTitle}” എന്ന വാർത്തയെ എഡിറ്റോറിയൽ ഔട്ട്പുട്ടുകളാക്കി മാറ്റുക.
-          എല്ലാ AI മറുപടികളും <span className="font-medium text-foreground">മലയാളത്തിൽ</span>{" "}
-          (Gemini → AI Orchestrator). അംഗീകരിക്കുന്നതിന് മുമ്പ് എഡിറ്റ് ചെയ്യാം.
+          “{story.title}” — research, copy, script (Manglish), media, and
+          publishing packages. Edit mode uses the updated Manglish typing
+          engine.
         </p>
       </header>
 
@@ -190,54 +265,70 @@ export function AiNewsProducerTab({
         {NEWS_PRODUCER_SECTIONS.map((id) => (
           <TabsContent key={id} value={id} className="mt-0 space-y-3">
             {id === section ? (
-              <>
-                <div className="flex flex-wrap gap-2">
-                  {sectionActions.map((action) => (
-                    <Button
-                      key={action.id}
-                      type="button"
-                      size="sm"
-                      disabled={pending}
-                      onClick={() => runAction(action.id)}
-                    >
-                      {pending ? (
-                        <Loader2 className="size-3.5 animate-spin" />
-                      ) : (
-                        <Sparkles className="size-3.5" />
-                      )}
-                      {action.label}
-                    </Button>
-                  ))}
+              id === "media" ? (
+                <div className="space-y-4">
+                  <ProducerMediaGeneratePanel storyId={story.id} />
+                  <StoryMediaPanel story={story} />
                 </div>
-
-                {sectionOutputs.length === 0 ? (
-                  <p className="rounded-lg border border-dashed border-border/70 px-4 py-8 text-sm text-muted-foreground">
-                    No {NEWS_PRODUCER_SECTION_LABELS[id].toLowerCase()} outputs
-                    yet. Generate to create a reviewable content object.
-                  </p>
-                ) : (
-                  <ul className="space-y-3">
-                    {sectionOutputs.map((output) => (
-                      <ProducerOutputCard
-                        key={output.id}
-                        output={output}
-                        storyId={storyId}
-                        pending={pending}
-                        editing={editingId === output.id}
-                        draft={draft}
-                        onBeginEdit={() => {
-                          setEditingId(output.id);
-                          setDraft(output.producer.body);
-                        }}
-                        onCancelEdit={() => setEditingId(null)}
-                        onDraftChange={setDraft}
-                        onPatched={(next) => upsertOutputs([next])}
-                        startTransition={startTransition}
-                      />
+              ) : (
+                <>
+                  <div className="flex flex-wrap gap-2">
+                    {sectionActions.map((action) => (
+                      <Button
+                        key={action.id}
+                        type="button"
+                        size="sm"
+                        disabled={pending}
+                        onClick={() => runAction(action.id)}
+                      >
+                        {pending ? (
+                          <Loader2 className="size-3.5 animate-spin" />
+                        ) : (
+                          <Sparkles className="size-3.5" />
+                        )}
+                        {action.label}
+                      </Button>
                     ))}
-                  </ul>
-                )}
-              </>
+                  </div>
+
+                  {sectionOutputs.length === 0 ? (
+                    <p className="rounded-lg border border-dashed border-border/70 px-4 py-8 text-sm text-muted-foreground">
+                      No {NEWS_PRODUCER_SECTION_LABELS[id].toLowerCase()} outputs
+                      yet. Generate to create a reviewable content object.
+                    </p>
+                  ) : (
+                    <ul className="space-y-3">
+                      {sectionOutputs.map((output) => (
+                        <ProducerOutputCard
+                          key={output.id}
+                          output={output}
+                          storyId={story.id}
+                          organizationId={story.organization_id}
+                          pending={pending}
+                          editing={editingId === output.id}
+                          draft={draft}
+                          onBeginEdit={() => {
+                            setEditingId(output.id);
+                            setDraft(output.producer.body);
+                          }}
+                          onCancelEdit={() => setEditingId(null)}
+                          onDraftChange={setDraft}
+                          onPatched={(next) => {
+                            if ("applied" in next) {
+                              applyApprovedResult(
+                                next as ApproveProducerActionData,
+                              );
+                            } else {
+                              upsertOutputs([next]);
+                            }
+                          }}
+                          startTransition={startTransition}
+                        />
+                      ))}
+                    </ul>
+                  )}
+                </>
+              )
             ) : null}
           </TabsContent>
         ))}
@@ -249,6 +340,7 @@ export function AiNewsProducerTab({
 function ProducerOutputCard({
   output,
   storyId,
+  organizationId,
   pending,
   editing,
   draft,
@@ -260,17 +352,56 @@ function ProducerOutputCard({
 }: {
   output: NewsProducerOutput;
   storyId: string;
+  organizationId: string;
   pending: boolean;
   editing: boolean;
   draft: string;
   onBeginEdit: () => void;
   onCancelEdit: () => void;
   onDraftChange: (value: string) => void;
-  onPatched: (output: NewsProducerOutput) => void;
+  onPatched: (output: NewsProducerOutput | ApproveProducerActionData) => void;
   startTransition: (fn: () => Promise<void>) => void;
 }) {
   const waiting = output.producer.approvalStatus === "waiting_for_approval";
   const ai = output.producer.ai;
+  const isSubHeadlines = output.producer.kind === "summary";
+  const manglishEdit = usesManglishEditor(output.producer.kind);
+
+  const [slotTexts, setSlotTexts] = useState(() =>
+    parseSubHeadlineSlots(output.producer.body),
+  );
+  const [slotMedia, setSlotMedia] = useState<SubHeadlineMediaRef[]>(() =>
+    parseSubHeadlineMedia(output.producer.subHeadlineMedia),
+  );
+  const [slotsDirty, setSlotsDirty] = useState(false);
+
+  useEffect(() => {
+    if (slotsDirty) return;
+    setSlotTexts(parseSubHeadlineSlots(output.producer.body));
+    setSlotMedia(parseSubHeadlineMedia(output.producer.subHeadlineMedia));
+  }, [
+    output.id,
+    output.version,
+    output.producer.body,
+    output.producer.subHeadlineMedia,
+    slotsDirty,
+  ]);
+
+  async function persistSubHeadlineSlots() {
+    const result = await updateNewsProducerOutputAction({
+      outputId: output.id,
+      storyId,
+      body: joinSubHeadlineSlots(slotTexts),
+      subHeadlineMedia: slotMedia,
+    });
+    if (!result.success) {
+      toast.error(result.error);
+      return null;
+    }
+    onPatched(result.data);
+    setSlotsDirty(false);
+    return result.data;
+  }
 
   return (
     <li
@@ -313,6 +444,10 @@ function ProducerOutputCard({
             disabled={pending}
             onClick={() =>
               startTransition(async () => {
+                if (isSubHeadlines && slotsDirty) {
+                  const saved = await persistSubHeadlineSlots();
+                  if (!saved) return;
+                }
                 const result = await approveNewsProducerOutputAction(
                   output.id,
                   storyId,
@@ -322,7 +457,13 @@ function ProducerOutputCard({
                   return;
                 }
                 onPatched(result.data);
-                toast.success("Approved");
+                if (result.data.producer.kind === "tv_script") {
+                  toast.success("Story script approved");
+                } else if (result.data.producer.kind === "summary") {
+                  toast.success("Sub headlines & media applied to story");
+                } else {
+                  toast.success("Approved");
+                }
               })
             }
           >
@@ -355,14 +496,91 @@ function ProducerOutputCard({
         </div>
       ) : null}
 
-      {editing ? (
+      {isSubHeadlines ? (
         <div className="mt-3 space-y-2">
-          <Textarea
-            value={draft}
-            onChange={(e) => onDraftChange(e.target.value)}
-            rows={10}
-            className="text-sm"
+          <SubHeadlineSlotsEditor
+            texts={slotTexts}
+            media={slotMedia}
+            organizationId={organizationId}
+            storyId={storyId}
+            disabled={pending}
+            onTextsChange={(texts) => {
+              setSlotTexts(texts);
+              setSlotsDirty(true);
+            }}
+            onMediaChange={(media) => {
+              setSlotMedia(media);
+              setSlotsDirty(true);
+            }}
           />
+          <div className="flex flex-wrap items-center gap-2">
+            <Button
+              type="button"
+              size="sm"
+              disabled={pending || !slotsDirty}
+              onClick={() =>
+                startTransition(async () => {
+                  const saved = await persistSubHeadlineSlots();
+                  if (saved) toast.success("Sub headlines & media saved");
+                })
+              }
+            >
+              Save media & text
+            </Button>
+            {slotsDirty ? (
+              <Button
+                type="button"
+                size="sm"
+                variant="ghost"
+                disabled={pending}
+                onClick={() => {
+                  setSlotTexts(parseSubHeadlineSlots(output.producer.body));
+                  setSlotMedia(
+                    parseSubHeadlineMedia(output.producer.subHeadlineMedia),
+                  );
+                  setSlotsDirty(false);
+                }}
+              >
+                Discard
+              </Button>
+            ) : (
+              <p className="text-[11px] text-muted-foreground">
+                Pick Image / Video / Caption on each slot, then Browse or
+                Generate.
+              </p>
+            )}
+          </div>
+        </div>
+      ) : editing ? (
+        <div className="mt-3 space-y-2">
+          {manglishEdit ? (
+            <MediaOSEditor
+              key={`edit-${output.id}-${output.version}`}
+              variant="compact"
+              storyId={storyId}
+              initialHtml={plainToEditorHtml(draft)}
+              initialLanguage="ml"
+              placeholder="Edit with Manglish typing…"
+              settings={{
+                toolbarLayout: "compact",
+                enableManglish: true,
+                enableVoiceDictation: true,
+                enableHandwriting: false,
+                autoSave: false,
+                autoTransliteration: true,
+                newsroomFormat:
+                  output.producer.kind === "tv_script"
+                    ? "tv_script"
+                    : "website_article",
+              }}
+              onChange={(payload) => onDraftChange(payload.contentPlain)}
+            />
+          ) : (
+            <Input
+              value={draft}
+              onChange={(event) => onDraftChange(event.target.value)}
+            />
+          )}
           <div className="flex gap-2">
             <Button
               type="button"
@@ -404,7 +622,7 @@ function ProducerOutputCard({
       )}
 
       <div className="mt-3 flex flex-wrap gap-1.5">
-        {!editing ? (
+        {!editing && !isSubHeadlines ? (
           <Button
             type="button"
             size="sm"
@@ -432,6 +650,7 @@ function ProducerOutputCard({
                 toast.error(result.error);
                 return;
               }
+              setSlotsDirty(false);
               onPatched(result.data);
               toast.success("Regenerated");
             })
@@ -447,7 +666,11 @@ function ProducerOutputCard({
           className="h-8"
           onClick={async () => {
             try {
-              await navigator.clipboard.writeText(output.producer.body);
+              await navigator.clipboard.writeText(
+                isSubHeadlines
+                  ? joinSubHeadlineSlots(slotTexts)
+                  : output.producer.body,
+              );
               toast.success("Copied");
             } catch {
               toast.error("Clipboard unavailable");
@@ -465,6 +688,10 @@ function ProducerOutputCard({
           disabled={pending}
           onClick={() =>
             startTransition(async () => {
+              if (isSubHeadlines && slotsDirty) {
+                const saved = await persistSubHeadlineSlots();
+                if (!saved) return;
+              }
               const result = await saveNewsProducerContentObjectAction(
                 output.id,
                 storyId,
@@ -474,7 +701,7 @@ function ProducerOutputCard({
                 return;
               }
               onPatched(result.data);
-              toast.success("Saved as content object (ready)");
+              toast.success("Saved and applied");
             })
           }
         >

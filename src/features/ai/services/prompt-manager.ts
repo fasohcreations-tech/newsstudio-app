@@ -31,9 +31,26 @@ export function resolveLocale(
   return fallback;
 }
 
+function pickLocalizedBody(
+  map: Partial<Record<AILocale, string>> | undefined,
+  locale: AILocale,
+): string | null {
+  if (!map) return null;
+  return map[locale] ?? map.en ?? Object.values(map).find(Boolean) ?? null;
+}
+
+function interpolate(
+  body: string,
+  variables: Record<string, string>,
+): string {
+  return body.replace(VARIABLE_PATTERN, (_, key: string) => {
+    return variables[key] ?? "";
+  });
+}
+
 export function renderPrompt(
   promptId: string,
-  variables: Record<string, string>,
+  variables: Record<string, string> = {},
   locale: AILocale = "en",
 ): RenderedPrompt {
   const template = getPromptTemplate(promptId);
@@ -42,17 +59,14 @@ export function renderPrompt(
   }
 
   const resolvedLocale = resolveLocale(locale);
-  const body =
-    template.templates[resolvedLocale] ??
-    template.templates.en ??
-    Object.values(template.templates)[0];
+  const body = pickLocalizedBody(template.templates, resolvedLocale);
 
   if (!body) {
     throw new Error(`Prompt ${promptId} has no template body.`);
   }
 
   const missing = template.variables.filter(
-    (key) => variables[key] === undefined || variables[key] === "",
+    (key) => variables[key] === undefined,
   );
   if (missing.length > 0) {
     throw new Error(
@@ -60,15 +74,18 @@ export function renderPrompt(
     );
   }
 
-  const text = body.replace(VARIABLE_PATTERN, (_, key: string) => {
-    return variables[key] ?? "";
-  });
+  const text = interpolate(body, variables);
+  const systemBody = pickLocalizedBody(
+    template.systemTemplates,
+    resolvedLocale,
+  );
 
   return {
     promptId: template.id,
     promptVersion: template.version,
     locale: template.templates[resolvedLocale] ? resolvedLocale : "en",
     text,
+    systemText: systemBody ? interpolate(systemBody, variables) : undefined,
   };
 }
 

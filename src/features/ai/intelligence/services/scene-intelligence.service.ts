@@ -106,9 +106,9 @@ export async function recommendScenes(
     userId: input.userId,
     storyId: input.storyId ?? undefined,
     jobType: INTELLIGENCE_JOB_TYPES.sceneRecommend,
-    systemPrompt:
-      "You are MediaOS Scene Intelligence. Recommend existing templates only. Return JSON only.",
-    prompt: `Story type: ${input.storyType ?? "news"}
+    promptId: "intelligence.scene",
+    promptVariables: {
+      context_block: `Story type: ${input.storyType ?? "news"}
 Language: ${input.language ?? "en"}
 Assets: ${(input.availableAssetTypes ?? []).join(", ") || "unspecified"}
 Preferences: ${(input.preferences ?? []).join(", ") || "none"}
@@ -117,6 +117,7 @@ Catalog:
 ${catalog || "(empty)"}
 
 Return JSON: { recommendations: Array<{ sceneId: string, sceneName: string, sceneType: string, score: number, reasons: string[] }>, confidence: number, rationale: string }`,
+    },
   });
 
   let items = heuristic;

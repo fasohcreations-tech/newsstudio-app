@@ -6,6 +6,7 @@ import type { ComposerScene } from "@/features/scene-composer/types/scene-compos
 import {
   bindingsToStoryData,
   mergeStoryDataBindings,
+  syncSubHeadlineDerivedFields,
 } from "@/features/story-production/lib/story-data-bindings";
 import {
   applySystemClockBindings,
@@ -17,6 +18,7 @@ import {
   createEmptyStoryData,
   isStoryUnpopulated,
 } from "@/features/story-production/lib/story-data-defaults";
+import { parseSubHeadlineSlots } from "@/features/story-production/lib/sub-headlines";
 import { useSystemClock } from "@/features/story-production/hooks/use-system-clock";
 import type { StoryDataRecord } from "@/features/story-production/types/story-data.types";
 
@@ -146,11 +148,41 @@ export function useStoryDataForm({
     <K extends keyof StoryDataRecord>(key: K, value: StoryDataRecord[K]) => {
       setData((prev) => {
         if (Object.is(prev[key], value)) return prev;
-        return { ...prev, [key]: value };
+        const next = { ...prev, [key]: value };
+        if (
+          key === "sub_headline_1" ||
+          key === "sub_headline_2" ||
+          key === "sub_headline_3" ||
+          key === "sub_headline_4" ||
+          key === "summary"
+        ) {
+          if (key === "summary" && typeof value === "string") {
+            const slots = parseSubHeadlineSlots(value);
+            next.sub_headline_1 = slots[0] ?? "";
+            next.sub_headline_2 = slots[1] ?? "";
+            next.sub_headline_3 = slots[2] ?? "";
+            next.sub_headline_4 = slots[3] ?? "";
+          }
+          return syncSubHeadlineDerivedFields(next);
+        }
+        return next;
       });
     },
     [],
   );
+
+  const patchFields = useCallback((patch: Partial<StoryDataRecord>) => {
+    setData((prev) => {
+      const next = { ...prev, ...patch };
+      const touchesSubHeadlines =
+        "sub_headline_1" in patch ||
+        "sub_headline_2" in patch ||
+        "sub_headline_3" in patch ||
+        "sub_headline_4" in patch ||
+        "summary" in patch;
+      return touchesSubHeadlines ? syncSubHeadlineDerivedFields(next) : next;
+    });
+  }, []);
 
   const applyAsset = useCallback(
     (bindingKey: string, url: string) => {
@@ -172,6 +204,10 @@ export function useStoryDataForm({
         optional_info_image: "optional_info_image",
         optional_info_image_3: "optional_info_image_3",
         optional_info: "optional_info_image",
+        sub_headline_1_media: "sub_headline_1_media",
+        sub_headline_2_media: "sub_headline_2_media",
+        sub_headline_3_media: "sub_headline_3_media",
+        sub_headline_4_media: "sub_headline_4_media",
       };
       const field = fieldMap[bindingKey];
       if (field) updateField(field, url);
@@ -191,6 +227,7 @@ export function useStoryDataForm({
     bindings,
     revision: 0,
     updateField,
+    patchFields,
     applyAsset,
     applyMedia,
     systemClock,

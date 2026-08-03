@@ -23,6 +23,14 @@ export type StoryStatus =
   | "published"
   | "archived";
 
+export type StoryVoiceStatus =
+  | "none"
+  | "pending"
+  | "generating"
+  | "ready"
+  | "failed"
+  | "stale";
+
 export type StoryPriority = "low" | "normal" | "high" | "urgent";
 
 export type MediaFileType =
@@ -505,6 +513,21 @@ export type Database = {
           created_at: string;
           updated_at: string;
           deleted_at: string | null;
+          approved_script: string | null;
+          approved_by: string | null;
+          approved_at: string | null;
+          voice_status: StoryVoiceStatus;
+          voice_url: string | null;
+          voice_duration_ms: number | null;
+          voice_name: string | null;
+          voice_language: string | null;
+          voice_speaking_rate: number | null;
+          voice_pitch: number | null;
+          voice_volume_gain_db: number | null;
+          voice_generated_at: string | null;
+          voice_error: string | null;
+          voice_storage_path: string | null;
+          sub_headline_media: Json;
         };
         Insert: {
           id?: string;
@@ -525,6 +548,21 @@ export type Database = {
           created_at?: string;
           updated_at?: string;
           deleted_at?: string | null;
+          approved_script?: string | null;
+          approved_by?: string | null;
+          approved_at?: string | null;
+          voice_status?: StoryVoiceStatus;
+          voice_url?: string | null;
+          voice_duration_ms?: number | null;
+          voice_name?: string | null;
+          voice_language?: string | null;
+          voice_speaking_rate?: number | null;
+          voice_pitch?: number | null;
+          voice_volume_gain_db?: number | null;
+          voice_generated_at?: string | null;
+          voice_error?: string | null;
+          voice_storage_path?: string | null;
+          sub_headline_media?: Json;
         };
         Update: {
           id?: string;
@@ -545,6 +583,21 @@ export type Database = {
           created_at?: string;
           updated_at?: string;
           deleted_at?: string | null;
+          approved_script?: string | null;
+          approved_by?: string | null;
+          approved_at?: string | null;
+          voice_status?: StoryVoiceStatus;
+          voice_url?: string | null;
+          voice_duration_ms?: number | null;
+          voice_name?: string | null;
+          voice_language?: string | null;
+          voice_speaking_rate?: number | null;
+          voice_pitch?: number | null;
+          voice_volume_gain_db?: number | null;
+          voice_generated_at?: string | null;
+          voice_error?: string | null;
+          voice_storage_path?: string | null;
+          sub_headline_media?: Json;
         };
         Relationships: [
           {
@@ -2203,6 +2256,7 @@ export type Database = {
     Enums: {
       membership_status: MembershipStatus;
       story_status: StoryStatus;
+      story_voice_status: StoryVoiceStatus;
       story_priority: StoryPriority;
       media_file_type: MediaFileType;
       media_storage_scope: MediaStorageScope;

@@ -6,6 +6,7 @@ import { createClient } from "@/shared/lib/supabase/server";
 import { requireAuth } from "@/features/auth/guards/require-auth";
 import { scriptSaveSchema } from "@/features/story-workspace/lib/script-utils";
 import { saveCurrentStoryScript } from "@/features/story-workspace/services/script.service";
+import { markStoryVoiceStaleIfScriptDiverged } from "@/features/story-voice/services/editorial-voice.service";
 
 export type ActionResult<T = void> =
   | { success: true; data: T }
@@ -34,6 +35,12 @@ export async function saveStoryScriptAction(
   if (error || !script) {
     return { success: false, error: error ?? "Unable to save script." };
   }
+
+  await markStoryVoiceStaleIfScriptDiverged(supabase, {
+    storyId: parsed.data.storyId,
+    contentPlain: parsed.data.contentPlain,
+    userId: user.id,
+  });
 
   revalidatePath(`/newsroom/stories/${parsed.data.storyId}`);
   return {

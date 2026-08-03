@@ -5,6 +5,18 @@ import {
   STORY_PRIORITIES,
   STORY_STATUSES,
 } from "@/features/newsroom/constants/story.constants";
+import { emptySubHeadlineMediaSlots } from "@/features/story-production/lib/sub-headlines";
+
+const subHeadlineMediaItemSchema = z.object({
+  kind: z.union([
+    z.literal(""),
+    z.literal("image"),
+    z.literal("video"),
+    z.literal("caption"),
+  ]),
+  ref: z.string(),
+  caption: z.string(),
+});
 
 export const storyFormSchema = z.object({
   title: z
@@ -24,6 +36,7 @@ export const storyFormSchema = z.object({
     .max(4000, "Summary must be 4000 characters or fewer")
     .optional()
     .or(z.literal("")),
+  sub_headline_media: z.array(subHeadlineMediaItemSchema).max(4).optional(),
   status: z.enum(STORY_STATUSES, { message: "Status is required" }),
   priority: z.enum(STORY_PRIORITIES),
   category: z
@@ -51,6 +64,7 @@ export const storyFormDefaults = {
   title: "",
   subtitle: "",
   summary: "",
+  sub_headline_media: emptySubHeadlineMediaSlots(),
   status: "draft" as const,
   priority: "normal" as const,
   category: "",

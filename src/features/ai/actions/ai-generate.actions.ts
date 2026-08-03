@@ -43,6 +43,8 @@ const generateTextSchema = z.object({
   maxTokens: z.number().int().min(64).max(8192).optional(),
   systemPrompt: z.string().trim().max(8_000).optional(),
   providerId: z.enum(AI_PROVIDER_IDS).optional().default("gemini"),
+  /** Optional catalog override; defaults to ai.playground. */
+  promptId: z.string().trim().min(3).max(120).optional(),
 });
 
 export type GenerateTextActionInput = z.infer<typeof generateTextSchema>;
@@ -137,8 +139,13 @@ export async function generateTextAction(
     jobType: "ai_center.gemini_test",
     providerId: input.providerId,
     model: input.model,
-    prompt: input.prompt,
-    systemPrompt: input.systemPrompt,
+    promptId: input.promptId ?? "ai.playground",
+    promptVariables: {
+      user_prompt: input.prompt,
+      system_note:
+        input.systemPrompt?.trim() ||
+        "You are helping test the MediaOS AI Orchestrator from AI Center.",
+    },
     temperature: input.temperature,
     topP: input.topP,
     topK: input.topK,

@@ -161,10 +161,22 @@ export type AIOrgSettingsPatch = Partial<
 export type PromptTemplate = {
   id: string;
   version: string;
-  category: "news" | "translation" | "voice" | "graphics" | "publishing";
+  category:
+    | "news"
+    | "translation"
+    | "voice"
+    | "graphics"
+    | "publishing"
+    | "editor"
+    | "intelligence"
+    | "media"
+    | "system"
+    | "ai";
   description: string;
   /** Locale → template body with {{variable}} placeholders */
   templates: Partial<Record<AILocale, string>> & { en: string };
+  /** Optional system instruction templates (same variables as body). */
+  systemTemplates?: Partial<Record<AILocale, string>> & { en?: string };
   variables: string[];
 };
 
@@ -173,6 +185,7 @@ export type RenderedPrompt = {
   promptVersion: string;
   locale: AILocale;
   text: string;
+  systemText?: string;
 };
 
 export type OrchestratorContext = {
@@ -182,16 +195,23 @@ export type OrchestratorContext = {
   contentObjectId?: string;
   jobType: string;
   locale?: AILocale;
-  promptId?: string;
+  /** Required — all AI generations must use a PromptManager template. */
+  promptId: string;
   promptVariables?: Record<string, string>;
+  /** Optional secondary template for system instruction. */
+  systemPromptId?: string;
+  systemPromptVariables?: Record<string, string>;
   providerId?: AIProviderId;
   model?: string;
 };
 
 export type OrchestratorTextRequest = OrchestratorContext & {
-  /** Direct prompt when not using Prompt Manager */
-  prompt?: string;
-  systemPrompt?: string;
+  /**
+   * @deprecated Raw prompts are rejected. Use promptId + promptVariables.
+   * Kept optional only so TypeScript migration surfaces clear errors.
+   */
+  prompt?: never;
+  systemPrompt?: never;
   /** Optional per-request overrides (AI Center tests, etc.) */
   temperature?: number;
   topP?: number;

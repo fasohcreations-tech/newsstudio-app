@@ -86,25 +86,37 @@ Rules:
 
 export const newsSummaryPrompt: PromptTemplate = {
   id: "news.summary",
-  version: "1.1.0",
+  version: "2.0.0",
   category: "news",
-  description: "Editorial summary for a story",
-  variables: ["title", "summary", "body", "maxWords"],
+  description: "Short lower-info sub-headlines for broadcast lower third",
+  variables: ["title", "summary", "body"],
   templates: {
-    en: `Write an editorial summary of at most {{maxWords}} words for newsroom use.
+    en: `Write exactly 4 very short sub-headlines for a TV lower-information panel (lower third).
 Headline: {{title}}
-Existing summary: {{summary}}
+Existing lines: {{summary}}
 Body:
 {{body}}
 
-Return only the summary paragraph(s).`,
-    ml: `ന്യൂസ്റൂം ഉപയോഗത്തിനായി {{maxWords}} വാക്കുകൾക്കുള്ളിൽ എഡിറ്റോറിയൽ സംഗ്രഹം എഴുതുക.
+Rules:
+- Exactly 4 lines
+- One sub-headline per line
+- Each line under 72 characters
+- No numbering, bullets, or hashtags
+- Punchy, scannable, on-air friendly
+- Return only the 4 lines`,
+    ml: `ടിവി ലോവർ-ഇൻഫോ പാനലിനായി കൃത്യം 4 വളരെ ചെറിയ സബ് ഹെഡ്‌ലൈനുകൾ എഴുതുക.
 തലക്കെട്ട്: {{title}}
-നിലവിലുള്ള സംഗ്രഹം: {{summary}}
+നിലവിലുള്ള വരികൾ: {{summary}}
 ഉള്ളടക്കം:
 {{body}}
 
-സംഗ്രഹം മാത്രം നൽകുക.`,
+നിയമങ്ങൾ:
+- കൃത്യം 4 വരികൾ
+- ഓരോ വരിയിലും ഒരു സബ് ഹെഡ്‌ലൈൻ
+- ഓരോ വരിയും 72 അക്ഷരത്തിനുള്ളിൽ
+- നമ്പറിംഗ് / ബുള്ളറ്റ് / ഹാഷ്‌ടാഗ് വേണ്ട
+- ഓൺ-എയർ ലോവർ തേർഡിന് പറ്റിയ ചെറിയ വരികൾ
+- 4 വരികൾ മാത്രം നൽകുക`,
   },
 };
 

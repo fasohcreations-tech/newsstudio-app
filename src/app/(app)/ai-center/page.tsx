@@ -89,8 +89,14 @@ export default async function AiCenterPage() {
         actions={
           <div className="flex flex-wrap gap-2">
             <Link
-              href="/ai-center/smart-editor"
+              href="/ai-center/usage"
               className={cn(buttonVariants())}
+            >
+              Token usage
+            </Link>
+            <Link
+              href="/ai-center/smart-editor"
+              className={cn(buttonVariants({ variant: "outline" }))}
             >
               Smart Editor
             </Link>

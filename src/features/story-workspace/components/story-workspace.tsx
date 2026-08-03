@@ -13,6 +13,7 @@ import { StoryGraphicsTab } from "@/features/story-workspace/components/tabs/gra
 import { PublishingTab } from "@/features/story-workspace/components/tabs/publishing-tab";
 import { WorkspacePlaceholderTab } from "@/features/story-workspace/components/tabs/workspace-placeholder-tab";
 import { AiNewsProducerTab } from "@/features/ai-news-producer/components/ai-news-producer-tab";
+import type { NewsProducerSection } from "@/features/ai-news-producer/constants/producer.constants";
 import {
   STORY_WORKSPACE_TABS,
   type SaveStatus,
@@ -32,29 +33,20 @@ import { useKeyboardShortcut } from "@/features/platform/hooks/use-keyboard-shor
 import { Skeleton } from "@/components/ui/skeleton";
 import { cn } from "@/lib/utils";
 
-const ScriptTab = dynamic(
+const VoiceTab = dynamic(
   () =>
-    import("@/features/story-workspace/components/tabs/script-tab").then(
-      (m) => m.ScriptTab,
+    import("@/features/story-workspace/components/tabs/voice-tab").then(
+      (m) => m.VoiceTab,
     ),
   {
     loading: () => <Skeleton className="h-64 w-full" />,
-    ssr: false,
-  },
-);
-
-const StoryMediaPanel = dynamic(
-  () =>
-    import("@/features/media/components/story-media-panel").then(
-      (m) => m.StoryMediaPanel,
-    ),
-  {
-    loading: () => <Skeleton className="h-48 w-full" />,
   },
 );
 
 const PRIMARY_TABS = STORY_WORKSPACE_TABS.filter((t) => t.ready);
-const SOON_TABS = STORY_WORKSPACE_TABS.filter((t) => !t.ready);
+const SOON_TABS = STORY_WORKSPACE_TABS.filter(
+  (t) => !t.ready && t.id !== "script" && t.id !== "media",
+);
 
 type StoryWorkspaceProps = {
   story: StoryWithRelations;
@@ -63,24 +55,41 @@ type StoryWorkspaceProps = {
   creativeProjects?: CreativeProject[];
 };
 
+function normalizeWorkspaceTab(
+  tab: StoryWorkspaceTabId,
+): StoryWorkspaceTabId {
+  if (tab === "script" || tab === "media") return "ai-producer";
+  return tab;
+}
+
 export function StoryWorkspace({
   story,
   script,
   currentUser,
   creativeProjects = [],
 }: StoryWorkspaceProps) {
+  const [workspaceStory, setWorkspaceStory] = useState(story);
+  const [scriptHtml, setScriptHtml] = useState(script.content_html);
   const [tab, setTab] = usePersistedState<StoryWorkspaceTabId>(
     `mediaos.story-tab.${story.id}`,
     "overview",
   );
+  const [producerSection, setProducerSection] =
+    useState<NewsProducerSection>("research");
   const [saveStatus, setSaveStatus] = useState<SaveStatus>("idle");
   const [lastSavedAt, setLastSavedAt] = useState<string | null>(script.updated_at);
   const [version, setVersion] = useState(script.version);
-  const [wordCount, setWordCount] = useState(script.word_count);
-  const [characterCount, setCharacterCount] = useState(script.character_count);
   const [showSoon, setShowSoon] = useState(false);
   const latestPayload = useRef<ScriptSavePayload | null>(null);
   const saveTimer = useRef<number | null>(null);
+
+  const openProducer = useCallback(
+    (section: NewsProducerSection = "research") => {
+      setProducerSection(section);
+      setTab("ai-producer");
+    },
+    [setTab],
+  );
 
   const persistScript = useCallback(async () => {
     const payload = latestPayload.current;
@@ -105,8 +114,7 @@ export function StoryWorkspace({
   const handleScriptChange = useCallback(
     (payload: ScriptSavePayload) => {
       latestPayload.current = payload;
-      setWordCount(payload.wordCount);
-      setCharacterCount(payload.characterCount);
+      setScriptHtml(payload.contentHtml);
       setSaveStatus("dirty");
 
       if (saveTimer.current) {
@@ -121,6 +129,23 @@ export function StoryWorkspace({
   );
 
   useEffect(() => {
+    setWorkspaceStory(story);
+  }, [story]);
+
+  useEffect(() => {
+    setScriptHtml(script.content_html);
+    setVersion(script.version);
+    setLastSavedAt(script.updated_at);
+  }, [script]);
+
+  useEffect(() => {
+    if (tab === "script" || tab === "media") {
+      setProducerSection(tab === "media" ? "media" : "script");
+      setTab("ai-producer");
+    }
+  }, [tab, setTab]);
+
+  useEffect(() => {
     return () => {
       if (saveTimer.current) {
         window.clearTimeout(saveTimer.current);
@@ -129,10 +154,11 @@ export function StoryWorkspace({
   }, []);
 
   useKeyboardShortcut("ctrl+1", () => setTab("overview"));
-  useKeyboardShortcut("ctrl+2", () => setTab("script"));
-  useKeyboardShortcut("ctrl+3", () => setTab("media"));
-  useKeyboardShortcut("ctrl+4", () => setTab("ai-producer"));
+  useKeyboardShortcut("ctrl+2", () => openProducer("script"));
+  useKeyboardShortcut("ctrl+3", () => openProducer("media"));
+  useKeyboardShortcut("ctrl+4", () => openProducer("research"));
   useKeyboardShortcut("ctrl+5", () => setTab("timeline"));
+  useKeyboardShortcut("ctrl+6", () => setTab("voice"));
   useKeyboardShortcut(
     "ctrl+s",
     () => {
@@ -141,16 +167,16 @@ export function StoryWorkspace({
     { allowInInputs: true },
   );
 
-  const deleted = Boolean(story.deleted_at);
-  const activeTab = STORY_WORKSPACE_TABS.some((t) => t.id === tab)
-    ? tab
-    : "overview";
+  const deleted = Boolean(workspaceStory.deleted_at);
+  const activeTab = normalizeWorkspaceTab(
+    STORY_WORKSPACE_TABS.some((t) => t.id === tab) ? tab : "overview",
+  );
 
   return (
     <div className="-m-4 flex h-[calc(100svh-3.5rem-2.25rem)] max-h-[calc(100svh-3.5rem-2.25rem)] min-h-0 flex-col overflow-hidden border-y border-border/60 bg-background md:-m-6">
       <div className="z-10 shrink-0 border-b border-border/60 bg-background">
         <StoryWorkspaceHeader
-          story={story}
+          story={workspaceStory}
           saveStatus={saveStatus}
           lastSavedAt={lastSavedAt}
         />
@@ -204,49 +230,61 @@ export function StoryWorkspace({
       <div className="flex min-h-0 flex-1">
         <div className="min-h-0 min-w-0 flex-1 overflow-auto p-4 md:p-5">
           {activeTab === "overview" ? (
-            <OverviewTab story={story} onOpenTab={setTab} />
-          ) : null}
-
-          {activeTab === "script" ? (
-            <ScriptTab
-              storyId={story.id}
-              initialHtml={script.content_html}
-              wordCount={wordCount}
-              characterCount={characterCount}
-              disabled={deleted}
-              onChange={handleScriptChange}
+            <OverviewTab
+              story={workspaceStory}
+              onOpenTab={(next) => {
+                if (next === "script") openProducer("script");
+                else if (next === "media") openProducer("media");
+                else setTab(next);
+              }}
+              onStoryUpdated={setWorkspaceStory}
             />
           ) : null}
 
-          {activeTab === "media" ? <StoryMediaPanel story={story} /> : null}
-
           {activeTab === "ai-producer" ? (
             <AiNewsProducerTab
-              storyId={story.id}
-              storyTitle={story.title}
+              story={workspaceStory}
+              initialSection={producerSection}
+              onStoryUpdated={(next) =>
+                setWorkspaceStory((prev) => ({ ...prev, ...next }))
+              }
+              onScriptApplied={(next) => {
+                setScriptHtml(next.contentHtml);
+                setVersion(next.version);
+                setLastSavedAt(next.updatedAt);
+                setSaveStatus("saved");
+                latestPayload.current = {
+                  contentHtml: next.contentHtml,
+                  contentPlain: next.contentPlain,
+                  wordCount: next.wordCount,
+                  characterCount: next.characterCount,
+                };
+              }}
             />
           ) : null}
 
           {activeTab === "timeline" ? (
             <TimelineTab
-              storyId={story.id}
-              storyTitle={story.title}
-              organizationId={story.organization_id}
+              storyId={workspaceStory.id}
+              storyTitle={workspaceStory.title}
+              organizationId={workspaceStory.organization_id}
               initialProjects={creativeProjects}
             />
           ) : null}
 
           {activeTab === "graphics" ? (
             <StoryGraphicsTab
-              storyId={story.id}
-              storyTitle={story.title}
+              storyId={workspaceStory.id}
+              storyTitle={workspaceStory.title}
             />
           ) : null}
 
           {activeTab === "voice" ? (
-            <WorkspacePlaceholderTab
-              title="Voice"
-              description="Voice-over generation and audio take management will dock here."
+            <VoiceTab
+              story={workspaceStory}
+              disabled={deleted}
+              onStoryUpdated={setWorkspaceStory}
+              onOpenScript={() => openProducer("script")}
             />
           ) : null}
 
@@ -281,10 +319,11 @@ export function StoryWorkspace({
           maxWidth={440}
         >
           <StoryWorkspaceSidebar
-            story={story}
-            onFocusScript={() => setTab("script")}
-            onFocusMedia={() => setTab("media")}
-            onFocusProducer={() => setTab("ai-producer")}
+            story={workspaceStory}
+            onFocusScript={() => openProducer("script")}
+            onFocusMedia={() => openProducer("media")}
+            onFocusProducer={() => openProducer("research")}
+            onFocusVoice={() => setTab("voice")}
           />
         </ResizablePanel>
       </div>

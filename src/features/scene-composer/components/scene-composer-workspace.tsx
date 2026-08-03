@@ -801,7 +801,9 @@ export function SceneComposerWorkspace({
           <PropertyInspectorPanel
             selectedObject={selectedObject}
             data={storyForm.data}
+            organizationId={composer.scene.organization_id}
             onFieldChange={storyForm.updateField}
+            onFieldsPatch={storyForm.patchFields}
             onObjectPatch={patchObject}
             onClearSelection={() => canvas.selectObject(null)}
             onBrowseMedia={() => openMediaBrowser(selectedObject)}
