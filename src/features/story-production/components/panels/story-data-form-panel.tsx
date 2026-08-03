@@ -25,6 +25,8 @@ type StoryDataFormPanelProps = {
   data: StoryDataRecord;
   organizationId?: string | null;
   storyId?: string | null;
+  /** Story Scene Instance — panel subheadline drives on-screen headline. */
+  instanceMode?: boolean;
   onFieldChange: <K extends keyof StoryDataRecord>(
     key: K,
     value: StoryDataRecord[K],
@@ -38,6 +40,7 @@ export function StoryDataFormPanel({
   data,
   organizationId,
   storyId,
+  instanceMode = false,
   onFieldChange,
   onFieldsPatch,
 }: StoryDataFormPanelProps) {
@@ -57,9 +60,13 @@ export function StoryDataFormPanel({
   return (
     <div className="flex h-full min-h-0 flex-col">
       <div className="border-b border-border/60 p-4">
-        <p className="text-[18px] font-semibold tracking-tight">Story Data</p>
+        <p className="text-[18px] font-semibold tracking-tight">
+          {instanceMode ? "Scene Data" : "Story Data"}
+        </p>
         <p className="text-[14px] text-muted-foreground">
-          Edit values — preview updates instantly. No Save required.
+          {instanceMode
+            ? "On-screen headline and main media for this scene only. Overrides stay on the instance."
+            : "Edit values — preview updates instantly. No Save required."}
         </p>
       </div>
 
@@ -81,6 +88,7 @@ export function StoryDataFormPanel({
             <div className="space-y-3 p-3">
               {GENERAL_FORM_FIELDS.map((field) => {
                 if (field.key === "sub_headline_1") {
+                  if (instanceMode) return null;
                   return (
                     <div key="sub-headlines" className="space-y-2">
                       <Label className="text-xs">Sub Headlines</Label>
@@ -114,7 +122,11 @@ export function StoryDataFormPanel({
                 return (
                   <StoryFormField
                     key={field.key}
-                    label={field.label}
+                    label={
+                      instanceMode && field.key === "headline"
+                        ? "On-screen Headline"
+                        : field.label
+                    }
                     type={field.type}
                     value={data[field.key] as string | boolean}
                     onChange={(value) =>
@@ -127,8 +139,9 @@ export function StoryDataFormPanel({
                 );
               })}
               <p className="text-[11px] text-muted-foreground">
-                Sub Headlines rotate in the lower information panel. Link
-                image, video, or caption media on each slot for scene building.
+                {instanceMode
+                  ? "This value fills the Headline region on the canvas. Story Headline stays story-level and is not shown here."
+                  : "Sub Headlines rotate in the lower information panel. Link image, video, or caption media on each slot for scene building."}
               </p>
             </div>
           </ScrollArea>

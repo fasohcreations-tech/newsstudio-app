@@ -273,30 +273,33 @@ export function MotionSceneLibraryHome({
               </p>
             </button>
             <div className="flex border-t border-border/40 px-2 py-1">
+              <Button
+                type="button"
+                size="sm"
+                variant="ghost"
+                className="h-7 text-xs"
+                onClick={() =>
+                  void duplicateMotionSceneAction(scene.id).then((result) => {
+                    if (!result.success) {
+                      toast.error(result.error ?? "Duplicate failed");
+                      return;
+                    }
+                    setScenes((prev) => [result.data, ...prev]);
+                    toast.success(
+                      isGnnScene(scene)
+                        ? "Master duplicated as a new draft template"
+                        : "Scene duplicated",
+                    );
+                  })
+                }
+              >
+                Duplicate
+              </Button>
               {isGnnScene(scene) ? (
                 <p className="px-2 py-1.5 text-[10px] text-muted-foreground">
-                  Master template — use History inside the editor for versions
+                  Master — story builds use clones only
                 </p>
-              ) : (
-                <Button
-                  type="button"
-                  size="sm"
-                  variant="ghost"
-                  className="h-7 text-xs"
-                  onClick={() =>
-                    void duplicateMotionSceneAction(scene.id).then((result) => {
-                      if (!result.success) {
-                        toast.error(result.error ?? "Duplicate failed");
-                        return;
-                      }
-                      setScenes((prev) => [result.data, ...prev]);
-                      toast.success("Scene duplicated");
-                    })
-                  }
-                >
-                  Duplicate
-                </Button>
-              )}
+              ) : null}
             </div>
           </Card>
         ))}

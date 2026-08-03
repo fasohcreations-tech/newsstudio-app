@@ -258,7 +258,7 @@ export async function generateText(
         message: toErrorMessage(error),
       });
       if (!retryable || attempt >= attempts) break;
-      await sleep(250 * attempt);
+      await sleep(retryDelayMs(error, attempt));
     }
   }
 
@@ -306,7 +306,7 @@ export async function generateImage(
   const model =
     request.model ??
     process.env.DEFAULT_GEMINI_IMAGE_MODEL?.trim() ??
-    "gemini-2.5-flash-image";
+    "gemini-3.1-flash-image";
 
   if (!request.promptId?.trim()) {
     return {
@@ -427,7 +427,7 @@ export async function generateImage(
         message: toErrorMessage(error),
       });
       if (!retryable || attempt >= attempts) break;
-      await sleep(250 * attempt);
+      await sleep(retryDelayMs(error, attempt));
     }
   }
 
@@ -457,6 +457,8 @@ function validateOrchestratorRequest(request: OrchestratorTextRequest) {
 
 function isRetryableError(error: unknown): boolean {
   if (error instanceof AIProviderError) {
+    // Hard quota / billing failures never recover with immediate retries.
+    if (error.code === "quota_exhausted") return false;
     return (
       error.code === "timeout" ||
       error.code === "rate_limit" ||
@@ -465,6 +467,14 @@ function isRetryableError(error: unknown): boolean {
     );
   }
   return false;
+}
+
+function retryDelayMs(error: unknown, attempt: number): number {
+  // Rate limits need real backoff; short 250ms retries burn remaining quota.
+  if (error instanceof AIProviderError && error.code === "rate_limit") {
+    return Math.min(15_000, 2_000 * attempt);
+  }
+  return 250 * attempt;
 }
 
 function toErrorMessage(error: unknown): string {

@@ -274,8 +274,10 @@ export function StoryWorkspace({
 
           {activeTab === "graphics" ? (
             <StoryGraphicsTab
-              storyId={workspaceStory.id}
-              storyTitle={workspaceStory.title}
+              story={workspaceStory}
+              disabled={deleted}
+              onOpenVoice={() => setTab("voice")}
+              onOpenScript={() => openProducer("script")}
             />
           ) : null}
 

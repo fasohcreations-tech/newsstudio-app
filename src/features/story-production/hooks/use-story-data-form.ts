@@ -21,6 +21,10 @@ import {
 import { parseSubHeadlineSlots } from "@/features/story-production/lib/sub-headlines";
 import { useSystemClock } from "@/features/story-production/hooks/use-system-clock";
 import type { StoryDataRecord } from "@/features/story-production/types/story-data.types";
+import {
+  isStoryInstanceScene,
+  remapStoryDataToPanelScene,
+} from "@/features/story-scene-builder/lib/build-panel-bindings";
 
 type UseStoryDataFormOptions = {
   scene: ComposerScene;
@@ -35,9 +39,42 @@ function readStoredStoryData(scene: ComposerScene): StoryDataRecord | null {
   return null;
 }
 
+function readSegmentIndex(scene: ComposerScene): number {
+  const meta = scene.metadata as Record<string, unknown> | undefined;
+  const props = scene.properties as Record<string, unknown> | undefined;
+  const fromMeta = meta?.segment_index;
+  const fromProps = props?.segment_index;
+  if (typeof fromMeta === "number" && Number.isFinite(fromMeta)) return fromMeta;
+  if (typeof fromProps === "number" && Number.isFinite(fromProps)) return fromProps;
+  return 0;
+}
+
 function initialStoryData(scene: ComposerScene): StoryDataRecord {
   const base = createEmptyStoryData();
+  const meta = scene.metadata as Record<string, unknown> | undefined;
   const stored = readStoredStoryData(scene);
+
+  if (isStoryInstanceScene(meta)) {
+    const merged = bindingsToStoryData(scene.resolved_bindings, {
+      ...base,
+      ...(stored ?? {}),
+    });
+    return remapStoryDataToPanelScene({
+      data: merged,
+      bindings: {
+        ...scene.resolved_bindings,
+        panel_subheadline: String(meta?.panel_subheadline ?? ""),
+        story_headline: String(
+          meta?.story_headline ?? scene.resolved_bindings.story_headline ?? "",
+        ),
+      },
+      segmentIndex: readSegmentIndex(scene),
+      storyHeadline: String(
+        meta?.story_headline ?? scene.resolved_bindings.story_headline ?? "",
+      ),
+    });
+  }
+
   if (stored && !isStoryUnpopulated(stored)) {
     return bindingsToStoryData(scene.resolved_bindings, {
       ...base,
@@ -84,6 +121,8 @@ export function useStoryDataForm({
   );
   const systemClock = useSystemClock();
   const skipBindingsEmitRef = useRef(true);
+  const meta = scene.metadata as Record<string, unknown> | undefined;
+  const isInstance = isStoryInstanceScene(meta);
 
   const bindings = useMemo(() => {
     const live = buildLiveStoryBindings(data, existingBindingsRef.current);
@@ -95,9 +134,20 @@ export function useStoryDataForm({
   useEffect(() => {
     if (skipBindingsEmitRef.current) {
       skipBindingsEmitRef.current = false;
-      return;
+      // Story instances: still emit remapped bindings once so canvas matches panel.
+      if (!isInstance) return;
     }
     const merged = mergeStoryDataBindings(data, existingBindingsRef.current);
+    // Keep story identity tokens without letting them override on-screen headline.
+    if (isInstance) {
+      const storyHeadline = String(
+        meta?.story_headline ?? existingBindingsRef.current.story_headline ?? "",
+      );
+      if (storyHeadline) {
+        merged.story_headline = storyHeadline;
+        merged.title = storyHeadline;
+      }
+    }
     const bindingsKey = JSON.stringify(merged);
     const dataKey = JSON.stringify(data);
     if (
@@ -109,16 +159,22 @@ export function useStoryDataForm({
     }
     lastEmittedRef.current = { bindings: bindingsKey, data: dataKey };
     onBindingsChangeRef.current(merged, data);
-  }, [data]);
+  }, [data, isInstance, meta?.story_headline]);
 
-  // First-launch demo seed (including GNN-001 skeleton).
+  // First-launch demo seed (including GNN-001 skeleton). Skip for story instances.
   useEffect(() => {
     if (seededSceneIdRef.current === scene.id) return;
     seededSceneIdRef.current = scene.id;
 
+    const sceneMeta = scene.metadata as Record<string, unknown> | undefined;
+    if (isStoryInstanceScene(sceneMeta)) {
+      const next = initialStoryData(scene);
+      setData((prev) => (storyDataEqual(prev, next) ? prev : next));
+      return;
+    }
+
     const stored = readStoredStoryData(scene);
-    const engineVersion = (scene.metadata as Record<string, unknown> | undefined)
-      ?.story_engine_version;
+    const engineVersion = sceneMeta?.story_engine_version;
     const current = stored
       ? { ...createEmptyStoryData(), ...stored }
       : createEmptyStoryData();
@@ -226,6 +282,7 @@ export function useStoryDataForm({
     data,
     bindings,
     revision: 0,
+    isStoryInstance: isInstance,
     updateField,
     patchFields,
     applyAsset,

@@ -31,6 +31,19 @@ export type StoryVoiceStatus =
   | "failed"
   | "stale";
 
+export type StoryPackageStatus =
+  | "draft"
+  | "building"
+  | "ready"
+  | "failed"
+  | "archived";
+
+export type StorySceneInstanceStatus =
+  | "draft"
+  | "ready"
+  | "editing"
+  | "archived";
+
 export type StoryPriority = "low" | "normal" | "high" | "urgent";
 
 export type MediaFileType =
@@ -2225,6 +2238,231 @@ export type Database = {
         };
         Relationships: [];
       };
+      story_packages: {
+        Row: {
+          id: string;
+          organization_id: string;
+          story_id: string;
+          title: string;
+          status: StoryPackageStatus;
+          master_template_id: string | null;
+          master_template_code: string | null;
+          scene_count: number;
+          total_duration_ms: number;
+          voice_duration_ms: number | null;
+          ai_metadata: Json;
+          history: Json;
+          error: string | null;
+          built_at: string | null;
+          built_by: string | null;
+          created_by: string;
+          updated_by: string | null;
+          created_at: string;
+          updated_at: string;
+          deleted_at: string | null;
+        };
+        Insert: {
+          id?: string;
+          organization_id: string;
+          story_id: string;
+          title: string;
+          status?: StoryPackageStatus;
+          master_template_id?: string | null;
+          master_template_code?: string | null;
+          scene_count?: number;
+          total_duration_ms?: number;
+          voice_duration_ms?: number | null;
+          ai_metadata?: Json;
+          history?: Json;
+          error?: string | null;
+          built_at?: string | null;
+          built_by?: string | null;
+          created_by: string;
+          updated_by?: string | null;
+          created_at?: string;
+          updated_at?: string;
+          deleted_at?: string | null;
+        };
+        Update: {
+          id?: string;
+          organization_id?: string;
+          story_id?: string;
+          title?: string;
+          status?: StoryPackageStatus;
+          master_template_id?: string | null;
+          master_template_code?: string | null;
+          scene_count?: number;
+          total_duration_ms?: number;
+          voice_duration_ms?: number | null;
+          ai_metadata?: Json;
+          history?: Json;
+          error?: string | null;
+          built_at?: string | null;
+          built_by?: string | null;
+          created_by?: string;
+          updated_by?: string | null;
+          created_at?: string;
+          updated_at?: string;
+          deleted_at?: string | null;
+        };
+        Relationships: [];
+      };
+      story_voice_segments: {
+        Row: {
+          id: string;
+          organization_id: string;
+          story_id: string;
+          package_id: string;
+          sort_order: number;
+          label: string;
+          text: string;
+          start_ms: number;
+          end_ms: number;
+          duration_ms: number;
+          headline: string | null;
+          subheadline: string | null;
+          body_text: string | null;
+          media_kind: string;
+          media_ref: string;
+          media_caption: string;
+          metadata: Json;
+          created_at: string;
+          updated_at: string;
+        };
+        Insert: {
+          id?: string;
+          organization_id: string;
+          story_id: string;
+          package_id: string;
+          sort_order?: number;
+          label?: string;
+          text: string;
+          start_ms?: number;
+          end_ms?: number;
+          duration_ms?: number;
+          headline?: string | null;
+          subheadline?: string | null;
+          body_text?: string | null;
+          media_kind?: string;
+          media_ref?: string;
+          media_caption?: string;
+          metadata?: Json;
+          created_at?: string;
+          updated_at?: string;
+        };
+        Update: {
+          id?: string;
+          organization_id?: string;
+          story_id?: string;
+          package_id?: string;
+          sort_order?: number;
+          label?: string;
+          text?: string;
+          start_ms?: number;
+          end_ms?: number;
+          duration_ms?: number;
+          headline?: string | null;
+          subheadline?: string | null;
+          body_text?: string | null;
+          media_kind?: string;
+          media_ref?: string;
+          media_caption?: string;
+          metadata?: Json;
+          created_at?: string;
+          updated_at?: string;
+        };
+        Relationships: [];
+      };
+      story_scene_instances: {
+        Row: {
+          id: string;
+          organization_id: string;
+          package_id: string;
+          story_id: string;
+          master_template_id: string;
+          scene_id: string;
+          voice_segment_id: string | null;
+          sort_order: number;
+          timeline_order: number;
+          name: string;
+          status: StorySceneInstanceStatus;
+          duration_ms: number;
+          headline: string;
+          subheadline: string;
+          body_text: string;
+          video_asset_ref: string;
+          image_asset_ref: string;
+          logo_ref: string;
+          advertisement_ref: string;
+          animations: Json;
+          behaviors: Json;
+          metadata: Json;
+          created_by: string;
+          updated_by: string | null;
+          created_at: string;
+          updated_at: string;
+          deleted_at: string | null;
+        };
+        Insert: {
+          id?: string;
+          organization_id: string;
+          package_id: string;
+          story_id: string;
+          master_template_id: string;
+          scene_id: string;
+          voice_segment_id?: string | null;
+          sort_order?: number;
+          timeline_order?: number;
+          name: string;
+          status?: StorySceneInstanceStatus;
+          duration_ms?: number;
+          headline?: string;
+          subheadline?: string;
+          body_text?: string;
+          video_asset_ref?: string;
+          image_asset_ref?: string;
+          logo_ref?: string;
+          advertisement_ref?: string;
+          animations?: Json;
+          behaviors?: Json;
+          metadata?: Json;
+          created_by: string;
+          updated_by?: string | null;
+          created_at?: string;
+          updated_at?: string;
+          deleted_at?: string | null;
+        };
+        Update: {
+          id?: string;
+          organization_id?: string;
+          package_id?: string;
+          story_id?: string;
+          master_template_id?: string;
+          scene_id?: string;
+          voice_segment_id?: string | null;
+          sort_order?: number;
+          timeline_order?: number;
+          name?: string;
+          status?: StorySceneInstanceStatus;
+          duration_ms?: number;
+          headline?: string;
+          subheadline?: string;
+          body_text?: string;
+          video_asset_ref?: string;
+          image_asset_ref?: string;
+          logo_ref?: string;
+          advertisement_ref?: string;
+          animations?: Json;
+          behaviors?: Json;
+          metadata?: Json;
+          created_by?: string;
+          updated_by?: string | null;
+          created_at?: string;
+          updated_at?: string;
+          deleted_at?: string | null;
+        };
+        Relationships: [];
+      };
     };
     Views: Record<string, never>;
     Functions: {
@@ -2257,6 +2495,8 @@ export type Database = {
       membership_status: MembershipStatus;
       story_status: StoryStatus;
       story_voice_status: StoryVoiceStatus;
+      story_package_status: StoryPackageStatus;
+      story_scene_instance_status: StorySceneInstanceStatus;
       story_priority: StoryPriority;
       media_file_type: MediaFileType;
       media_storage_scope: MediaStorageScope;

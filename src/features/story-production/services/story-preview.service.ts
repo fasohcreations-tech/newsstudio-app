@@ -34,7 +34,7 @@ export function resolveObjectMediaUrl(
     return resolveBindingMediaUrl(bindings, [
       "logo",
       "channel_logo",
-      "image",
+      "watermark",
     ]);
   }
 
@@ -63,8 +63,7 @@ export function resolveObjectMediaUrl(
         "reporter_photo",
         "reporter_image",
         "logo",
-        "image",
-        "main_image",
+        "channel_logo",
       ]);
     }
     if (name.includes("background") || name.includes("bg")) {

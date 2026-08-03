@@ -38,6 +38,7 @@ import {
   useComposerDocument,
 } from "@/features/scene-composer/hooks/use-composer-document";
 import { useComposerCanvas } from "@/features/scene-composer/hooks/use-composer-canvas";
+import { isLockedMasterTemplate } from "@/features/story-scene-builder/lib/master-template-guard";
 import { useComposerPlayback } from "@/features/scene-composer/hooks/use-composer-playback";
 import {
   areShapesEnabledOnAllLayers,
@@ -126,6 +127,26 @@ export function SceneComposerWorkspace({
       null
     );
   }, [canvas.selection.primaryObjectId, composer.scene.composer_document.objects]);
+
+  const masterLocked = useMemo(
+    () =>
+      isLockedMasterTemplate({
+        id: composer.scene.id,
+        name: composer.scene.name,
+        is_template: composer.scene.is_template,
+        is_published: composer.scene.is_published,
+        workflow_state: composer.scene.workflow_state,
+        deleted_at: composer.scene.deleted_at,
+      }),
+    [
+      composer.scene.deleted_at,
+      composer.scene.id,
+      composer.scene.is_published,
+      composer.scene.is_template,
+      composer.scene.name,
+      composer.scene.workflow_state,
+    ],
+  );
 
   /** Skip auto-preview on first mount; play layer motion whenever selection changes. */
   const lastMotionPreviewIdRef = useRef<string | null | undefined>(undefined);
@@ -256,6 +277,23 @@ export function SceneComposerWorkspace({
       scene: ComposerScene,
       options?: { checkpoint?: boolean; revalidate?: boolean },
     ) => {
+      if (
+        isLockedMasterTemplate({
+          id: scene.id,
+          name: scene.name,
+          is_template: scene.is_template,
+          is_published: scene.is_published,
+          workflow_state: scene.workflow_state,
+          deleted_at: scene.deleted_at,
+        })
+      ) {
+        setSaveStatus("idle");
+        toast.error(
+          "Published Master Template is locked. Duplicate or version it instead of editing.",
+        );
+        return;
+      }
+
       const fingerprint = sceneFingerprint(scene);
       const isAutosave = !options?.checkpoint;
 
@@ -575,9 +613,26 @@ export function SceneComposerWorkspace({
             <Badge variant="secondary" className="text-[12px]">
               Scene Composer
             </Badge>
+            {masterLocked ? (
+              <Badge variant="destructive" className="text-[12px]">
+                Master locked
+              </Badge>
+            ) : null}
+            {composer.scene.is_template && !masterLocked ? (
+              <Badge variant="outline" className="text-[12px]">
+                Master draft
+              </Badge>
+            ) : null}
+            {!composer.scene.is_template ? (
+              <Badge variant="outline" className="text-[12px]">
+                Story instance
+              </Badge>
+            ) : null}
           </div>
           <p className={EDITOR_UI.helper}>
-            Broadcast graphics editor · Live preview · v{composer.scene.version}
+            {masterLocked
+              ? "Published Master Template — duplicate or version instead of editing."
+              : `Broadcast graphics editor · Live preview · v${composer.scene.version}`}
           </p>
         </div>
         <Button
@@ -802,6 +857,12 @@ export function SceneComposerWorkspace({
             selectedObject={selectedObject}
             data={storyForm.data}
             organizationId={composer.scene.organization_id}
+            storyId={
+              typeof composer.scene.metadata?.story_id === "string"
+                ? composer.scene.metadata.story_id
+                : null
+            }
+            instanceMode={Boolean(storyForm.isStoryInstance)}
             onFieldChange={storyForm.updateField}
             onFieldsPatch={storyForm.patchFields}
             onObjectPatch={patchObject}

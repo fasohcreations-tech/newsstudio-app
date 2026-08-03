@@ -19,6 +19,10 @@ import type {
   SceneCategory,
   SceneVersion,
 } from "@/features/motion-scene-engine/types/motion-scene.types";
+import {
+  assertMasterTemplatePatchAllowed,
+  type MasterTemplateGuardRow,
+} from "@/features/story-scene-builder/lib/master-template-guard";
 import { withQueryLog } from "@/shared/lib/supabase/query-log";
 
 type Client = SupabaseClient;
@@ -211,6 +215,28 @@ export class SupabaseMotionSceneService {
     const syncNormalized = options?.syncNormalized !== false;
     const refetch = options?.refetch !== false;
 
+    const { data: current, error: currentError } = await this.db()
+      .from("creative_studio_motion_scenes")
+      .select("id, name, is_template, is_published, workflow_state, deleted_at")
+      .eq("id", sceneId)
+      .is("deleted_at", null)
+      .maybeSingle();
+
+    if (currentError) {
+      return fail<MotionSceneWithRelations>(currentError.message);
+    }
+    if (!current) {
+      return fail<MotionSceneWithRelations>("Motion scene not found");
+    }
+
+    const lockError = assertMasterTemplatePatchAllowed(
+      current as MasterTemplateGuardRow,
+      patch as Record<string, unknown>,
+    );
+    if (lockError) {
+      return fail<MotionSceneWithRelations>(lockError);
+    }
+
     // When not refetching, omit scene_document / timeline from the response body
     // — returning the JSON we just wrote doubles autosave egress.
     const returning = refetch
@@ -273,13 +299,19 @@ export class SupabaseMotionSceneService {
     if (!source.data) return fail<MotionSceneWithRelations>(source.error ?? "Not found");
 
     const src = source.data;
+    // Duplicating a Master creates a new editable template draft — clear published lock
+    // and package_code so ensureDefaults does not treat the copy as GNN-001.
+    const { package_code: _packageCode, ...restMeta } = (src.metadata ??
+      {}) as Record<string, unknown>;
+    void _packageCode;
+
     const { data, error } = await this.db()
       .from("creative_studio_motion_scenes")
       .insert({
         organization_id: src.organization_id,
         category_id: src.category_id,
         brand_kit_id: src.brand_kit_id,
-        parent_scene_id: src.parent_scene_id ?? src.id,
+        parent_scene_id: src.id,
         scene_type: src.scene_type,
         name: `${src.name} (Copy)`,
         description: src.description,
@@ -293,8 +325,13 @@ export class SupabaseMotionSceneService {
         preview: src.preview,
         scene_document: src.scene_document,
         resolved_bindings: src.resolved_bindings,
-        metadata: { ...src.metadata, duplicated_from: src.id },
+        metadata: {
+          ...restMeta,
+          duplicated_from: src.id,
+        },
         is_template: true,
+        is_published: false,
+        workflow_state: "draft",
         created_by: userId,
         updated_by: userId,
       })

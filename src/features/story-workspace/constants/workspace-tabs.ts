@@ -6,7 +6,7 @@ export const STORY_WORKSPACE_TABS = [
   { id: "media", label: "Media", ready: false },
   { id: "ai-producer", label: "AI Producer", ready: true },
   { id: "timeline", label: "Timeline", ready: true },
-  { id: "graphics", label: "Graphics", ready: true },
+  { id: "graphics", label: "Scenes", ready: true },
   { id: "voice", label: "Voice", ready: true },
   { id: "publishing", label: "Publishing", ready: false },
   { id: "broadcast", label: "Broadcast", ready: false },

@@ -1,48 +1,33 @@
 "use client";
 
-import Link from "next/link";
-import { Layers, ArrowRight } from "lucide-react";
-
-import { Button } from "@/components/ui/button";
-import { Card, CardContent } from "@/components/ui/card";
+import { StorySceneLibraryTab } from "@/features/story-scene-builder/components/story-scene-library-tab";
+import type { StoryWithRelations } from "@/features/newsroom/types/story.types";
 
 type StoryGraphicsTabProps = {
-  storyId: string;
-  storyTitle: string;
+  story: StoryWithRelations;
+  disabled?: boolean;
+  onOpenVoice?: () => void;
+  onOpenScript?: () => void;
+  /** @deprecated kept for older call sites */
+  storyId?: string;
+  storyTitle?: string;
 };
 
+/**
+ * Graphics tab hosts the Story Scene Library (Production Pipeline Step 2).
+ */
 export function StoryGraphicsTab({
-  storyId,
-  storyTitle,
+  story,
+  disabled,
+  onOpenVoice,
+  onOpenScript,
 }: StoryGraphicsTabProps) {
   return (
-    <Card className="border-dashed">
-      <CardContent className="flex flex-col items-center gap-4 py-12 text-center">
-        <div className="flex size-12 items-center justify-center rounded-full bg-primary/10">
-          <Layers className="size-6 text-primary" />
-        </div>
-        <div className="max-w-md space-y-1">
-          <p className="font-medium">Motion Scene Engine</p>
-          <p className="text-sm text-muted-foreground">
-            Build reusable motion scenes for{" "}
-            <span className="font-medium text-foreground">{storyTitle}</span>.
-            Placeholders bind to story variables like {"{{headline}}"} and brand
-            kit colors.
-          </p>
-        </div>
-        <Button
-          type="button"
-          nativeButton={false}
-          render={<Link href="/creative-studio/scenes" />}
-        >
-          Open Scene Library
-          <ArrowRight className="size-4" />
-        </Button>
-        <p className="text-[11px] text-muted-foreground">
-          Story ID: {storyId.slice(0, 8)}… · Place scenes on timeline from a
-          Creative Studio project
-        </p>
-      </CardContent>
-    </Card>
+    <StorySceneLibraryTab
+      story={story}
+      disabled={disabled}
+      onOpenVoice={onOpenVoice}
+      onOpenScript={onOpenScript}
+    />
   );
 }

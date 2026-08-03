@@ -41,6 +41,9 @@ import {
   GNN_001_MAIN_VIDEO_CONTAINER_SLUG,
   GNN_001_MAIN_VIDEO_LAYER_VERSION,
 } from "@/features/scene-composer/lib/gnn-001-main-video.constants";
+import {
+  assertMasterTemplatePatchAllowed,
+} from "@/features/story-scene-builder/lib/master-template-guard";
 import type {
   ComposerScene,
   ComposerServiceResult,
@@ -130,7 +133,52 @@ export class SupabaseSceneComposerService {
       object_count: objectCount,
     };
 
-    // Single UPDATE — no pre-fetch, no second workflow UPDATE, no full-document
+    const { data: current, error: currentError } = await this.db()
+      .from("creative_studio_motion_scenes")
+      .select(
+        "id, name, is_template, is_published, workflow_state, deleted_at, duration_ms, scene_document, resolved_bindings, metadata, frame_rate, composer_settings",
+      )
+      .eq("id", sceneId)
+      .is("deleted_at", null)
+      .maybeSingle();
+
+    if (currentError) {
+      return fail<ComposerScene>(currentError.message);
+    }
+    if (!current) {
+      return fail<ComposerScene>("Scene not found");
+    }
+
+    const lockError = assertMasterTemplatePatchAllowed(
+      current,
+      {
+        name: patch.name,
+        duration_ms: patch.duration_ms,
+        scene_document: document,
+        resolved_bindings: patch.resolved_bindings,
+        metadata: mergedMetadata,
+        workflow_state: patch.workflow_state,
+        frame_rate: patch.frame_rate,
+        composer_settings: patch.composer_settings,
+      },
+      {
+        name: (current as { name?: string }).name,
+        duration_ms: (current as { duration_ms?: number }).duration_ms,
+        scene_document: (current as { scene_document?: unknown }).scene_document,
+        resolved_bindings: (current as { resolved_bindings?: unknown })
+          .resolved_bindings,
+        metadata: (current as { metadata?: unknown }).metadata,
+        workflow_state: (current as { workflow_state?: string }).workflow_state,
+        frame_rate: (current as { frame_rate?: number }).frame_rate,
+        composer_settings: (current as { composer_settings?: unknown })
+          .composer_settings,
+      },
+    );
+    if (lockError) {
+      return fail<ComposerScene>(lockError);
+    }
+
+    // Single UPDATE — no second workflow UPDATE, no full-document
     // response body. Relational table sync is opt-in (explicit Save / checkpoint).
     const { data, error } = await withQueryLog(
       `saveComposerScene:${sceneId}:${syncTables ? "checkpoint" : "autosave"}`,
@@ -685,15 +733,16 @@ export class SupabaseSceneComposerService {
   private async ensureGnnMasterScenes(organizationId: string, userId: string) {
     const { data: existing } = await this.db()
       .from("creative_studio_motion_scenes")
-      .select("id, name, metadata, updated_at")
-      .eq("organization_id", organizationId)
-      .is("deleted_at", null);
+      .select("id, name, metadata, updated_at, is_template, deleted_at")
+      .eq("organization_id", organizationId);
 
     type ExistingRow = {
       id: string;
       name: string;
       metadata: Record<string, unknown>;
       updated_at: string;
+      is_template: boolean;
+      deleted_at: string | null;
     };
 
     const rows: ExistingRow[] = (existing ?? []).map((row) => ({
@@ -701,17 +750,56 @@ export class SupabaseSceneComposerService {
       name: String(row.name ?? ""),
       metadata: (row.metadata as Record<string, unknown> | null) ?? {},
       updated_at: String(row.updated_at ?? ""),
+      is_template: Boolean(row.is_template),
+      deleted_at: typeof row.deleted_at === "string" ? row.deleted_at : null,
     }));
 
-    // Prefer the most recently updated scene for each package_code.
+    const isStoryInstanceRow = (row: ExistingRow) =>
+      row.metadata.is_story_instance === true ||
+      row.metadata.binding_model === "story-panel-v1" ||
+      (typeof row.metadata.story_id === "string" &&
+        row.metadata.story_id.length > 0 &&
+        !row.is_template);
+
+    // Masters only — never promote story scene clones into the GNN master slot.
+    const liveTemplateRows = rows.filter(
+      (row) => row.deleted_at == null && row.is_template && !isStoryInstanceRow(row),
+    );
+
+    // Prefer the most recently updated *template* for each package_code.
     const existingByCode = new Map<string, ExistingRow>();
-    for (const row of rows) {
+    for (const row of liveTemplateRows) {
       const code = row.metadata.package_code;
       if (typeof code !== "string") continue;
       const prev = existingByCode.get(code);
       if (!prev || row.updated_at > prev.updated_at) {
         existingByCode.set(code, row);
       }
+    }
+
+    // Revive soft-deleted masters when no live master exists for the code.
+    for (const code of GNN_MASTER_SCENE_CODES) {
+      if (existingByCode.has(code)) continue;
+      const softDeleted = rows
+        .filter(
+          (row) =>
+            row.deleted_at != null &&
+            row.is_template &&
+            !isStoryInstanceRow(row) &&
+            row.metadata.package_code === code,
+        )
+        .sort((a, b) => b.updated_at.localeCompare(a.updated_at));
+      const revive = softDeleted[0];
+      if (!revive) continue;
+      await this.db()
+        .from("creative_studio_motion_scenes")
+        .update({
+          deleted_at: null,
+          is_template: true,
+          updated_by: userId,
+        })
+        .eq("id", revive.id);
+      existingByCode.set(code, { ...revive, deleted_at: null });
     }
 
     const drafts = buildGnnBroadcastSceneDrafts();
@@ -721,7 +809,7 @@ export class SupabaseSceneComposerService {
       const code = String(draft.metadata.package_code ?? "");
       if (!code || existingByCode.has(code)) continue;
       const draftName = draft.name.trim().toLowerCase();
-      const matches = rows
+      const matches = liveTemplateRows
         .filter((row) => {
           const base = row.name
             .trim()
@@ -742,6 +830,7 @@ export class SupabaseSceneComposerService {
         .from("creative_studio_motion_scenes")
         .update({
           name: draft.name,
+          is_template: true,
           metadata: {
             ...adopt.metadata,
             ...draft.metadata,
@@ -846,6 +935,8 @@ export class SupabaseSceneComposerService {
             },
             metadata: draft.metadata,
             resolved_bindings: {},
+            is_template: true,
+            deleted_at: null,
             updated_by: userId,
           })
           .eq("id", existingScene.id);
@@ -915,6 +1006,8 @@ export class SupabaseSceneComposerService {
         name: draft.name,
         metadata: draft.metadata as Record<string, unknown>,
         updated_at: new Date().toISOString(),
+        is_template: true,
+        deleted_at: null,
       });
 
       await this.syncComposerTables(organizationId, inserted.id, {
@@ -924,7 +1017,8 @@ export class SupabaseSceneComposerService {
       });
     }
 
-    // Soft-delete retired codes + duplicate copies — one live file per package_code.
+    // Soft-delete retired template codes + duplicate *templates* only.
+    // Never soft-delete story scene instances (even if they inherited package_code).
     const allowedCodes = new Set<string>(GNN_MASTER_SCENE_CODES);
     const keepIds = new Set(
       [...existingByCode.entries()]
@@ -936,9 +1030,10 @@ export class SupabaseSceneComposerService {
       drafts.map((draft) => draft.name.trim().toLowerCase()),
     );
 
-    const obsoleteIds = rows
+    const obsoleteIds = liveTemplateRows
       .filter((row) => {
         if (keepIds.has(row.id)) return false;
+        if (isStoryInstanceRow(row)) return false;
 
         const packageId = row.metadata.package_id;
         const code = row.metadata.package_code;
@@ -968,6 +1063,28 @@ export class SupabaseSceneComposerService {
           updated_by: userId,
         })
         .in("id", obsoleteIds);
+    }
+
+    // Strip master package_code from story instances so they never compete again.
+    const pollutedInstances = rows.filter(
+      (row) =>
+        row.deleted_at == null &&
+        isStoryInstanceRow(row) &&
+        (row.metadata.package_code === "GNN-001" ||
+          row.metadata.package_id === GNN_BROADCAST_PACKAGE_ID),
+    );
+    for (const row of pollutedInstances) {
+      const nextMeta = { ...row.metadata };
+      delete nextMeta.package_code;
+      delete nextMeta.package_id;
+      nextMeta.is_story_instance = true;
+      await this.db()
+        .from("creative_studio_motion_scenes")
+        .update({
+          metadata: nextMeta,
+          updated_by: userId,
+        })
+        .eq("id", row.id);
     }
   }
 }

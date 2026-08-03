@@ -82,7 +82,7 @@ export async function estimateProducerMediaCostAction(raw: {
         raw.kind === "video"
           ? "veo-2.0-generate-001"
           : process.env.DEFAULT_GEMINI_IMAGE_MODEL?.trim() ||
-            "gemini-2.5-flash-image",
+            "gemini-3.1-flash-image",
       inputTokens: Math.ceil(prompt.length / 4),
       outputTokens: raw.kind === "video" ? 3500 : 1000,
       modality: "image",

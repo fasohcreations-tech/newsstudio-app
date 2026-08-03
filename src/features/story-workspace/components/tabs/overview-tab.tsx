@@ -22,6 +22,7 @@ import { StoryPriorityIndicator } from "@/features/newsroom/components/story-pri
 import { RelativeTime } from "@/features/newsroom/components/relative-time";
 import { profileDisplayName } from "@/features/newsroom/lib/story-utils";
 import { updateStoryAction } from "@/features/newsroom/actions/story.actions";
+import { syncStoryScenesFromPanelsAction } from "@/features/story-scene-builder/actions/scene-builder.actions";
 import type { StoryWithRelations } from "@/features/newsroom/types/story.types";
 import type { StoryWorkspaceTabId } from "@/features/story-workspace/constants/workspace-tabs";
 import { SubHeadlineSlotsEditor } from "@/features/story-production/components/form/sub-headline-slots-editor";
@@ -158,7 +159,24 @@ export function OverviewTab({
                           sub_headline_media:
                             serializeSubHeadlineMedia(slotMedia),
                         });
-                        toast.success("Sub headlines & media saved");
+                        const synced = await syncStoryScenesFromPanelsAction(
+                          story.id,
+                        );
+                        if (synced.success) {
+                          toast.success(
+                            `Saved · synced ${synced.data.updatedCount} scene${synced.data.updatedCount === 1 ? "" : "s"}`,
+                          );
+                        } else {
+                          toast.success("Sub headlines & media saved");
+                          // No package yet is fine — user builds scenes later.
+                          if (
+                            !synced.error
+                              .toLowerCase()
+                              .includes("no scene collection")
+                          ) {
+                            toast.message(synced.error);
+                          }
+                        }
                       })
                     }
                   >

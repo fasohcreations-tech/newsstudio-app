@@ -42,6 +42,7 @@ type PropertyInspectorPanelProps = {
   data: StoryDataRecord;
   organizationId?: string | null;
   storyId?: string | null;
+  instanceMode?: boolean;
   onFieldChange: <K extends keyof StoryDataRecord>(
     key: K,
     value: StoryDataRecord[K],
@@ -134,6 +135,7 @@ export function PropertyInspectorPanel({
   data,
   organizationId,
   storyId,
+  instanceMode = false,
   onFieldChange,
   onFieldsPatch,
   onObjectPatch,
@@ -461,6 +463,7 @@ export function PropertyInspectorPanel({
               data={data}
               organizationId={organizationId}
               storyId={storyId}
+              instanceMode={instanceMode}
               onFieldChange={onFieldChange}
               onFieldsPatch={onFieldsPatch}
             />

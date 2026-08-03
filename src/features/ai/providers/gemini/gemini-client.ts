@@ -62,11 +62,48 @@ export function withTimeout<T>(
   });
 }
 
+/** Flatten nested Google GenAI / fetch error payloads for classification. */
+function flattenGeminiErrorMessage(error: unknown): string {
+  if (error instanceof AIProviderError) return error.message;
+  if (!(error instanceof Error) && typeof error !== "object") {
+    return String(error ?? "Unknown Gemini provider error");
+  }
+
+  const parts: string[] = [];
+  if (error instanceof Error && error.message) parts.push(error.message);
+
+  const bag = error as Record<string, unknown>;
+  const nested =
+    (bag.error as Record<string, unknown> | undefined) ??
+    (bag.response as Record<string, unknown> | undefined) ??
+    bag;
+
+  if (typeof nested?.message === "string") parts.push(nested.message);
+  if (typeof nested?.status === "string") parts.push(nested.status);
+  if (typeof nested?.statusText === "string") parts.push(nested.statusText);
+  if (typeof nested?.code === "number" || typeof nested?.code === "string") {
+    parts.push(String(nested.code));
+  }
+
+  const details = nested?.details;
+  if (Array.isArray(details)) {
+    try {
+      parts.push(JSON.stringify(details));
+    } catch {
+      /* ignore */
+    }
+  }
+
+  const cause = (error as { cause?: unknown }).cause;
+  if (cause instanceof Error && cause.message) parts.push(cause.message);
+
+  return parts.filter(Boolean).join(" | ") || "Unknown Gemini provider error";
+}
+
 export function mapGeminiError(error: unknown): AIProviderError {
   if (error instanceof AIProviderError) return error;
 
-  const message =
-    error instanceof Error ? error.message : "Unknown Gemini provider error";
+  const message = flattenGeminiErrorMessage(error);
   const lower = message.toLowerCase();
 
   if (
@@ -83,6 +120,24 @@ export function mapGeminiError(error: unknown): AIProviderError {
     );
   }
 
+  // Image / paid models often return 429 with free_tier quotaValue 0.
+  const hardQuota =
+    lower.includes("check your plan and billing") ||
+    lower.includes("billing details") ||
+    lower.includes("free_tier") ||
+    lower.includes("quotavalue\":\"0\"") ||
+    lower.includes('"quotavalue":"0"') ||
+    lower.includes("quota value\": \"0\"") ||
+    /quota(?:value)?["\s:=]+0\b/.test(lower);
+
+  if (hardQuota) {
+    return new AIProviderError(
+      "Gemini image quota is unavailable on this API key. Enable billing on the Google AI / Cloud project (image models like gemini-3.1-flash-image are paid), then retry. See https://ai.google.dev/gemini-api/docs/rate-limits",
+      "gemini",
+      "quota_exhausted",
+    );
+  }
+
   if (
     lower.includes("429") ||
     lower.includes("rate") ||
@@ -90,7 +145,7 @@ export function mapGeminiError(error: unknown): AIProviderError {
     lower.includes("resource_exhausted")
   ) {
     return new AIProviderError(
-      "Gemini rate limit or quota exceeded. Try again shortly.",
+      "Gemini rate limit or daily quota exceeded. Wait a minute (RPD resets midnight Pacific) or check plan limits at https://ai.google.dev/gemini-api/docs/rate-limits",
       "gemini",
       "rate_limit",
     );

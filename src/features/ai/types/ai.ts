@@ -252,6 +252,7 @@ export class AIProviderError extends Error {
       | "timeout"
       | "invalid_api_key"
       | "rate_limit"
+      | "quota_exhausted"
       | "network"
       | "provider_offline"
       | "provider_error" = "provider_error",

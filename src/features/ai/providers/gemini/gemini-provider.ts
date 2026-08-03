@@ -53,7 +53,7 @@ export class GeminiProvider extends BaseAIProvider {
     const model =
       input.model?.trim() ||
       process.env.DEFAULT_GEMINI_IMAGE_MODEL?.trim() ||
-      "gemini-2.5-flash-image";
+      "gemini-3.1-flash-image";
     const prompt = input.prompt?.trim();
     if (!prompt) {
       throw new AIProviderError("Prompt is required.", this.id, "provider_error");
