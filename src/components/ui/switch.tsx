@@ -1,5 +1,6 @@
 "use client"
 
+import * as React from "react"
 import { Switch as SwitchPrimitive } from "@base-ui/react/switch"
 
 import { cn } from "@/lib/utils"
@@ -7,10 +8,19 @@ import { cn } from "@/lib/utils"
 function Switch({
   className,
   size = "default",
+  checked,
+  onCheckedChange,
   ...props
 }: SwitchPrimitive.Root.Props & {
   size?: "sm" | "default"
 }) {
+  // Ignore mount-sync emissions — Base UI can flip controlled switches while
+  // the Object inspector mounts after a layer click (max update depth).
+  const [ready, setReady] = React.useState(false)
+  React.useEffect(() => {
+    setReady(true)
+  }, [])
+
   return (
     <SwitchPrimitive.Root
       data-slot="switch"
@@ -20,6 +30,21 @@ function Switch({
         className
       )}
       {...props}
+      {...(checked !== undefined
+        ? {
+            checked,
+            onCheckedChange: (next, eventDetails) => {
+              if (!ready) return
+              if (next === checked) return
+              onCheckedChange?.(next, eventDetails)
+            },
+          }
+        : {
+            onCheckedChange: (next, eventDetails) => {
+              if (!ready) return
+              onCheckedChange?.(next, eventDetails)
+            },
+          })}
     >
       <SwitchPrimitive.Thumb
         data-slot="switch-thumb"

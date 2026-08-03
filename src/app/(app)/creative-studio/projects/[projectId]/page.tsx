@@ -1,5 +1,5 @@
 import type { Metadata } from "next";
-import { notFound } from "next/navigation";
+import Link from "next/link";
 
 import { requireAuth } from "@/features/auth/guards/require-auth";
 import { CreativeStudioWorkspace } from "@/features/creative-studio/components/creative-studio-workspace";
@@ -11,9 +11,12 @@ import { createClient } from "@/shared/lib/supabase/server";
 import { getCurrentProfile } from "@/features/profile/services/profile.service";
 import { resolveActiveMembership } from "@/features/organization/services/resolve-active-membership";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
+import { buttonVariants } from "@/components/ui/button";
+import { cn } from "@/lib/utils";
 
 type CreativeStudioProjectPageProps = {
   params: Promise<{ projectId: string }>;
+  searchParams: Promise<{ panel?: string }>;
 };
 
 export async function generateMetadata({
@@ -27,8 +30,10 @@ export async function generateMetadata({
 
 export default async function CreativeStudioProjectPage({
   params,
+  searchParams,
 }: CreativeStudioProjectPageProps) {
   const { projectId } = await params;
+  const query = await searchParams;
   const user = await requireAuth("/creative-studio");
   const supabase = await createClient();
   const { profile } = await getCurrentProfile(supabase, user.id);
@@ -67,11 +72,50 @@ export default async function CreativeStudioProjectPage({
   ]);
 
   if (!projectResult.data) {
-    notFound();
+    return (
+      <div className="space-y-4 p-6">
+        <Alert variant="destructive">
+          <AlertTitle>Creative Studio project unavailable</AlertTitle>
+          <AlertDescription>
+            {projectResult.error ??
+              "This project was not found, was deleted, or could not be loaded."}
+          </AlertDescription>
+        </Alert>
+        <div className="flex flex-wrap gap-2">
+          <Link
+            href="/creative-studio"
+            className={cn(buttonVariants({ variant: "default" }))}
+          >
+            Back to Creative Studio
+          </Link>
+          <Link
+            href="/creative-studio/scenes"
+            className={cn(buttonVariants({ variant: "outline" }))}
+          >
+            Open Scene Library
+          </Link>
+        </div>
+      </div>
+    );
   }
 
   if (projectResult.data.organization_id !== membership.organization.id) {
-    notFound();
+    return (
+      <div className="space-y-4 p-6">
+        <Alert variant="destructive">
+          <AlertTitle>Access denied</AlertTitle>
+          <AlertDescription>
+            This Creative Studio project belongs to another organization.
+          </AlertDescription>
+        </Alert>
+        <Link
+          href="/creative-studio"
+          className={cn(buttonVariants({ variant: "default" }))}
+        >
+          Back to Creative Studio
+        </Link>
+      </div>
+    );
   }
 
   const mediaAssets = (mediaResult.data?.assets ?? []).map((asset) =>
@@ -84,6 +128,7 @@ export default async function CreativeStudioProjectPage({
       templates={templatesResult.data ?? []}
       organizationId={membership.organization.id}
       mediaAssets={mediaAssets}
+      initialRightTab={query.panel === "ai" ? "ai" : "ai"}
     />
   );
 }

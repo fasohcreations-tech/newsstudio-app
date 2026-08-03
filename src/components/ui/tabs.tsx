@@ -1,5 +1,6 @@
 "use client"
 
+import * as React from "react"
 import { Tabs as TabsPrimitive } from "@base-ui/react/tabs"
 import { cva, type VariantProps } from "class-variance-authority"
 
@@ -8,8 +9,15 @@ import { cn } from "@/lib/utils"
 function Tabs({
   className,
   orientation = "horizontal",
+  value,
+  onValueChange,
   ...props
 }: TabsPrimitive.Root.Props) {
+  const [ready, setReady] = React.useState(false)
+  React.useEffect(() => {
+    setReady(true)
+  }, [])
+
   return (
     <TabsPrimitive.Root
       data-slot="tabs"
@@ -19,6 +27,29 @@ function Tabs({
         className
       )}
       {...props}
+      {...(value !== undefined
+        ? {
+            value,
+            onValueChange: (next: string | number | null, eventDetails: unknown) => {
+              // Ignore mount-sync and controlled re-emits (Base UI).
+              if (!ready) return
+              if (next == null || next === "") return
+              if (next === value) return
+              ;(onValueChange as ((v: typeof next, e: unknown) => void) | undefined)?.(
+                next,
+                eventDetails,
+              )
+            },
+          }
+        : {
+            onValueChange: (next: string | number | null, eventDetails: unknown) => {
+              if (!ready) return
+              ;(onValueChange as ((v: typeof next, e: unknown) => void) | undefined)?.(
+                next,
+                eventDetails,
+              )
+            },
+          })}
     />
   )
 }

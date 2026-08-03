@@ -16,6 +16,12 @@ import type {
 
 type Client = SupabaseClient<Database>;
 
+const OUTPUT_PACKAGE_SELECT =
+  "id, organization_id, story_id, content_object_id, platform, status, metadata, created_by, updated_by, created_at, updated_at, deleted_at";
+
+const PUBLISH_JOB_SELECT =
+  "id, organization_id, story_id, output_package_id, destination, status, scheduled_at, published_at, response, error, created_by, updated_by, created_at, updated_at";
+
 /**
  * PublishingService — output packages + publish job ledger.
  * No destination adapters or scheduled delivery in this sprint.
@@ -27,7 +33,7 @@ export async function listOutputPackages(
 ): Promise<ContentServiceResult<OutputPackage[]>> {
   let query = client
     .from("output_packages")
-    .select("*")
+    .select(OUTPUT_PACKAGE_SELECT)
     .eq("organization_id", scope.organizationId)
     .eq("story_id", scope.storyId)
     .order("updated_at", { ascending: false });
@@ -52,7 +58,7 @@ export async function getOutputPackage(
 ): Promise<ContentServiceResult<OutputPackage>> {
   const { data, error } = await client
     .from("output_packages")
-    .select("*")
+    .select(OUTPUT_PACKAGE_SELECT)
     .eq("id", id)
     .is("deleted_at", null)
     .maybeSingle();
@@ -69,7 +75,7 @@ export async function createOutputPackage(
   const { data, error } = await client
     .from("output_packages")
     .insert(input)
-    .select("*")
+    .select(OUTPUT_PACKAGE_SELECT)
     .single();
 
   if (error) return { data: null, error: error.message };
@@ -86,7 +92,7 @@ export async function updateOutputPackage(
     .update(patch)
     .eq("id", id)
     .is("deleted_at", null)
-    .select("*")
+    .select(OUTPUT_PACKAGE_SELECT)
     .single();
 
   if (error) return { data: null, error: error.message };
@@ -100,7 +106,7 @@ export async function listPublishJobs(
 ): Promise<ContentServiceResult<PublishJob[]>> {
   let query = client
     .from("publish_jobs")
-    .select("*")
+    .select(PUBLISH_JOB_SELECT)
     .eq("organization_id", scope.organizationId)
     .eq("story_id", scope.storyId)
     .order("created_at", { ascending: false });
@@ -122,7 +128,7 @@ export async function getPublishJob(
 ): Promise<ContentServiceResult<PublishJob>> {
   const { data, error } = await client
     .from("publish_jobs")
-    .select("*")
+    .select(PUBLISH_JOB_SELECT)
     .eq("id", id)
     .maybeSingle();
 
@@ -138,7 +144,7 @@ export async function createPublishJob(
   const { data, error } = await client
     .from("publish_jobs")
     .insert(input)
-    .select("*")
+    .select(PUBLISH_JOB_SELECT)
     .single();
 
   if (error) return { data: null, error: error.message };
@@ -154,7 +160,7 @@ export async function updatePublishJob(
     .from("publish_jobs")
     .update(patch)
     .eq("id", id)
-    .select("*")
+    .select(PUBLISH_JOB_SELECT)
     .single();
 
   if (error) return { data: null, error: error.message };

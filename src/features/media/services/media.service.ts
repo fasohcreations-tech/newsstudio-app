@@ -18,7 +18,25 @@ import type {
 type Client = SupabaseClient<Database>;
 
 const ASSET_SELECT = `
-  *,
+  id,
+  organization_id,
+  folder_id,
+  name,
+  original_filename,
+  storage_bucket,
+  storage_path,
+  file_type,
+  mime_type,
+  file_size,
+  width,
+  height,
+  duration_seconds,
+  checksum,
+  created_by,
+  updated_by,
+  created_at,
+  updated_at,
+  deleted_at,
   folder:media_folders(id, name),
   story_links:story_media(
     id,
@@ -29,6 +47,9 @@ const ASSET_SELECT = `
   )
 `;
 
+const FOLDER_SELECT =
+  "id, organization_id, parent_id, name, created_by, created_at, updated_at, deleted_at";
+
 export async function listMediaFolders(
   client: Client,
   organizationId: string,
@@ -36,7 +57,7 @@ export async function listMediaFolders(
 ): Promise<{ folders: MediaFolder[]; error: string | null }> {
   let query = client
     .from("media_folders")
-    .select("*")
+    .select(FOLDER_SELECT)
     .eq("organization_id", organizationId)
     .is("deleted_at", null)
     .order("name", { ascending: true });
@@ -58,7 +79,7 @@ export async function listAllMediaFolders(
 ): Promise<{ folders: MediaFolder[]; error: string | null }> {
   const { data, error } = await client
     .from("media_folders")
-    .select("*")
+    .select(FOLDER_SELECT)
     .eq("organization_id", organizationId)
     .is("deleted_at", null)
     .order("name", { ascending: true });
@@ -216,7 +237,7 @@ export async function createMediaFolder(
       name: input.name.trim(),
       created_by: userId,
     })
-    .select("*")
+    .select(FOLDER_SELECT)
     .single();
 
   if (error) return { folder: null, error: error.message };
@@ -435,16 +456,35 @@ export async function registerUploadedAsset(
   return { asset: data as unknown as MediaAssetWithMeta, error: null };
 }
 
+type SignedUrlCacheEntry = {
+  url: string;
+  expiresAt: number;
+};
+
+const signedUrlCache = new Map<string, SignedUrlCacheEntry>();
+
 export async function createSignedAssetUrl(
   client: Client,
   bucket: string,
   path: string,
   expiresIn = 3600,
 ): Promise<{ url: string | null; error: string | null }> {
+  const cacheKey = `${bucket}:${path}`;
+  const cached = signedUrlCache.get(cacheKey);
+  // Refresh 60s before expiry so clients never receive a near-dead URL.
+  if (cached && cached.expiresAt - 60_000 > Date.now()) {
+    return { url: cached.url, error: null };
+  }
+
   const { data, error } = await client.storage
     .from(bucket)
     .createSignedUrl(path, expiresIn);
 
   if (error) return { url: null, error: error.message };
+
+  signedUrlCache.set(cacheKey, {
+    url: data.signedUrl,
+    expiresAt: Date.now() + expiresIn * 1000,
+  });
   return { url: data.signedUrl, error: null };
 }

@@ -204,7 +204,15 @@ Adapters (stubs): OpenAI, Gemini, Claude, Ollama under `src/features/ai/provider
 Jobs: `ai_jobs` via `AIJobManager`. Settings stored in `organizations.settings.ai`.  
 API keys: server env only (`OPENAI_API_KEY`, `GEMINI_API_KEY`, `ANTHROPIC_API_KEY`, `OLLAMA_BASE_URL`).
 
-Generation / translation / image / voice features are intentionally not implemented yet.
+## AI Center Intelligence Platform (Module 6.0)
+
+Extends the existing AI Center into MediaOS’s central intelligence hub (does not replace it).
+
+- Seven services: Story · Scene · Timeline · Asset · Graphics · Voice · Broadcast
+- Recommendations only — explicit Accept / Reject; never auto-overwrite manual edits
+- Timeline AI produces **editable drafts only** (never rendered video)
+- Tables: `ai_recommendations`, `ai_recommendation_events` (migration `20260324000019`)
+- Docs: [`docs/ai/ai-center-intelligence.md`](docs/ai/ai-center-intelligence.md)
 
 ## News Intake Center (Feature 006)
 

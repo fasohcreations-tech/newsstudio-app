@@ -99,9 +99,11 @@ export function MainVideoPropertiesPanel({
             <FieldRow label="Media Mode">
               <Select
                 value={data.video_media_mode || "video"}
-                onValueChange={(value) =>
-                  onFieldChange("video_media_mode", value ?? "video")
-                }
+                onValueChange={(value) => {
+                  const next = value ?? "video";
+                  if ((data.video_media_mode || "video") === next) return;
+                  onFieldChange("video_media_mode", next);
+                }}
               >
                 <SelectTrigger className="h-8 text-xs">
                   <SelectValue />
@@ -148,9 +150,11 @@ export function MainVideoPropertiesPanel({
             <FieldRow label="Fit">
               <Select
                 value={data.video_fit || "fill"}
-                onValueChange={(value) =>
-                  onFieldChange("video_fit", value ?? "fill")
-                }
+                onValueChange={(value) => {
+                  const next = value ?? "fill";
+                  if ((data.video_fit || "fill") === next) return;
+                  onFieldChange("video_fit", next);
+                }}
               >
                 <SelectTrigger className="h-8 text-xs">
                   <SelectValue />
@@ -317,9 +321,11 @@ export function MainVideoPropertiesPanel({
             <FieldRow label="Live State">
               <Select
                 value={data.video_container_state || "normal"}
-                onValueChange={(value) =>
-                  onFieldChange("video_container_state", value ?? "normal")
-                }
+                onValueChange={(value) => {
+                  const next = value ?? "normal";
+                  if ((data.video_container_state || "normal") === next) return;
+                  onFieldChange("video_container_state", next);
+                }}
               >
                 <SelectTrigger className="h-8 text-xs">
                   <SelectValue />

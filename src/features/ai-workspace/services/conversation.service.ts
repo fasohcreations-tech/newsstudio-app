@@ -22,6 +22,15 @@ import type {
 
 type Client = SupabaseClient<Database>;
 
+const AI_CONVERSATION_SELECT =
+  "id, organization_id, story_id, title, status, metadata, created_by, updated_by, created_at, updated_at, deleted_at";
+
+const AI_MESSAGE_SELECT =
+  "id, organization_id, conversation_id, story_id, role, content, action_type, metadata, created_by, created_at, updated_at, deleted_at";
+
+const AI_WORKSPACE_OUTPUT_SELECT =
+  "id, organization_id, story_id, conversation_id, message_id, action_type, status, title, content, content_version, ai_job_id, structured, error, approved_at, approved_by, rejected_at, rejected_by, rejection_reason, created_by, updated_by, created_at, updated_at, deleted_at";
+
 export async function getOrCreateConversation(
   client: Client,
   args: {
@@ -50,7 +59,7 @@ export async function getOrCreateConversation(
       created_by: args.userId,
       updated_by: args.userId,
     })
-    .select("*")
+    .select(AI_CONVERSATION_SELECT)
     .single();
 
   if (error || !conversation) {
@@ -80,7 +89,7 @@ export async function getOrCreateConversation(
       metadata: { kind: "welcome", mock: true },
       created_by: args.userId,
     })
-    .select("*")
+    .select(AI_MESSAGE_SELECT)
     .single();
 
   if (welcomeError) {
@@ -99,7 +108,7 @@ export async function loadConversationForStory(
 ): Promise<AIWorkspaceServiceResult<AIConversationWithMessages | null>> {
   const { data: conversation, error } = await client
     .from("ai_conversations")
-    .select("*")
+    .select(AI_CONVERSATION_SELECT)
     .eq("story_id", storyId)
     .is("deleted_at", null)
     .maybeSingle();
@@ -109,7 +118,7 @@ export async function loadConversationForStory(
 
   const { data: messages, error: messagesError } = await client
     .from("ai_messages")
-    .select("*")
+    .select(AI_MESSAGE_SELECT)
     .eq("conversation_id", conversation.id)
     .is("deleted_at", null)
     .order("created_at", { ascending: true });
@@ -169,7 +178,7 @@ export async function sendChatMessage(
       metadata: { mock: true },
       created_by: args.userId,
     })
-    .select("*")
+    .select(AI_MESSAGE_SELECT)
     .single();
 
   if (userError || !userMessage) {
@@ -224,7 +233,7 @@ export async function sendChatMessage(
       },
       created_by: null,
     })
-    .select("*")
+    .select(AI_MESSAGE_SELECT)
     .single();
 
   if (assistantError || !assistantMessage) {
@@ -325,7 +334,7 @@ export async function runSuggestedAction(
       metadata: { kind: "suggested_action", mock: true },
       created_by: args.userId,
     })
-    .select("*")
+    .select(AI_MESSAGE_SELECT)
     .single();
 
   const job = await AIJobManager.enqueueJob(client, {
@@ -375,7 +384,7 @@ export async function runSuggestedAction(
       },
       created_by: null,
     })
-    .select("*")
+    .select(AI_MESSAGE_SELECT)
     .single();
 
   const { data: output, error: outputError } = await client
@@ -398,7 +407,7 @@ export async function runSuggestedAction(
       created_by: args.userId,
       updated_by: args.userId,
     })
-    .select("*")
+    .select(AI_WORKSPACE_OUTPUT_SELECT)
     .single();
 
   if (outputError || !output) {

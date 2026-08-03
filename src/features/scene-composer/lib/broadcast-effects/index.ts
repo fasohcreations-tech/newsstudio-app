@@ -40,3 +40,10 @@ export {
   resolveHeadlineLightSweepCoverage,
   type EffectCoverageRect,
 } from "@/features/scene-composer/lib/broadcast-effects/light-sweep-coverage";
+
+export {
+  GNN_001_HEADLINE_LIGHT_SWEEP_ID,
+  ensureHeadlineLightSweepDemo,
+  needsGnn001LightSweepDemoPatch,
+  patchGnn001LightSweepDemos,
+} from "@/features/scene-composer/lib/broadcast-effects/light-sweep-demo";

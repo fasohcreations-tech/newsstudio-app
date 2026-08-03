@@ -35,7 +35,7 @@ import type {
   MediaFolder,
 } from "@/features/media/types/media.types";
 import { cn } from "@/lib/utils";
-import { ModulePlaceholder } from "@/shared/components/layout/module-placeholder";
+import { AssetIntelligencePanel } from "@/features/ai/intelligence/components/asset-intelligence-panel";
 
 type MediaDetailsPanelProps = {
   asset: MediaAssetWithMeta | null;
@@ -295,10 +295,7 @@ export function MediaDetailsPanel({ asset, folders }: MediaDetailsPanelProps) {
             <h3 className="text-xs font-semibold tracking-wide text-muted-foreground uppercase">
               AI
             </h3>
-            <ModulePlaceholder
-              title="Future AI section"
-              description="Auto-tagging, face recognition, and smart search will connect here later."
-            />
+            <AssetIntelligencePanel asset={asset} />
           </section>
 
           <Separator />

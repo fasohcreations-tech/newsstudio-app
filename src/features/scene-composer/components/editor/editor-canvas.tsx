@@ -60,6 +60,12 @@ type EditorCanvasProps = {
   ) => void;
   onSetPanning: (value: boolean) => void;
   onBrowseMedia?: (object: SceneObject) => void;
+  onTransformLive?: (objectId: string, transform: SceneObject["transform"]) => void;
+  onTransformCommit?: (
+    objectId: string,
+    transform: SceneObject["transform"],
+    origin: SceneObject["transform"],
+  ) => void;
 };
 
 /**
@@ -83,6 +89,8 @@ export function EditorCanvas({
   onToggle,
   onSetPanning,
   onBrowseMedia,
+  onTransformLive,
+  onTransformCommit,
 }: EditorCanvasProps) {
   const containerRef = useRef<HTMLDivElement>(null);
   const [fitReady, setFitReady] = useState(false);
@@ -103,19 +111,35 @@ export function EditorCanvas({
   }, [artboard, viewport.rulersVisible]);
 
   const hasUserZoomed = useRef(false);
+  const zoomRef = useRef(viewport.zoom);
+  zoomRef.current = viewport.zoom;
 
   useEffect(() => {
     const container = containerRef.current;
     if (!container) return;
+    let frame = 0;
     const fit = () => {
       if (hasUserZoomed.current) return;
-      onFitZoom(computeFit());
-      setFitReady(true);
+      // Defer out of the ResizeObserver delivery — sync setState there can
+      // recurse into "Maximum update depth exceeded".
+      cancelAnimationFrame(frame);
+      frame = requestAnimationFrame(() => {
+        const next = computeFit();
+        if (Math.abs(zoomRef.current - next) < 0.001) {
+          setFitReady((ready) => ready || true);
+          return;
+        }
+        onFitZoom(next);
+        setFitReady((ready) => ready || true);
+      });
     };
     fit();
     const observer = new ResizeObserver(fit);
     observer.observe(container);
-    return () => observer.disconnect();
+    return () => {
+      cancelAnimationFrame(frame);
+      observer.disconnect();
+    };
   }, [computeFit, onFitZoom, aspect]);
 
   const applyZoom = useCallback(
@@ -149,7 +173,13 @@ export function EditorCanvas({
               : "fit"
           }
           onValueChange={(value) => {
-            if (!value || value === "fit") {
+            // Ignore null/empty from controlled Select sync — treating those as
+            // "fit" re-triggered applyFit every render.
+            if (value == null || value === "") return;
+            if (value === "fit") {
+              // Already in fit mode — Base UI may re-emit the controlled value
+              // and that used to recurse into max update depth.
+              if (!hasUserZoomed.current) return;
               applyFit();
               return;
             }
@@ -313,19 +343,31 @@ export function EditorCanvas({
                 onBrowseMedia={onBrowseMedia}
               />
 
-              {selectedObject && viewport.guidesVisible ? (
+              {selectedObject ? (
                 <SelectionChrome
                   object={selectedObject}
                   showGuides={viewport.guidesVisible}
                   artboardWidth={artboard.width}
                   artboardHeight={artboard.height}
-                />
-              ) : selectedObject ? (
-                <SelectionChrome
-                  object={selectedObject}
-                  showGuides={false}
-                  artboardWidth={artboard.width}
-                  artboardHeight={artboard.height}
+                  zoom={viewport.zoom}
+                  snapEnabled={viewport.snapEnabled}
+                  gridSize={scene.composer_settings.grid_size}
+                  spaceHeld={spaceHeld || isPanning}
+                  onTransformLive={
+                    onTransformLive
+                      ? (transform) => onTransformLive(selectedObject.id, transform)
+                      : undefined
+                  }
+                  onTransformCommit={
+                    onTransformCommit
+                      ? (transform, origin) =>
+                          onTransformCommit(
+                            selectedObject.id,
+                            transform,
+                            origin,
+                          )
+                      : undefined
+                  }
                 />
               ) : null}
             </div>

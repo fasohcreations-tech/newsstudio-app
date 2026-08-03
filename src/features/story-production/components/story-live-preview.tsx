@@ -53,10 +53,14 @@ import {
 } from "@/features/scene-composer/lib/edge-sweep";
 import {
   getShapeConfig,
+  resolveRadii,
   resolveRevealConfig,
+  sampleShapeBehaviors,
   sampleShapeReveal,
   shapePreviewDurationMs,
+  shapeRevealTotalMs,
 } from "@/features/scene-composer/lib/shape-composer";
+import type { ShapeComposerConfig } from "@/features/scene-composer/lib/shape-composer";
 import { SHAPE_BEHAVIOR_REPLAY_EVENT } from "@/features/scene-composer/components/editor/shape-renderer";
 import type {
   ComposerScene,
@@ -177,6 +181,29 @@ const PreviewClockContext = createContext<PreviewClockContextValue>({
   isPlaying: false,
 });
 
+type ShapeIntroGateContextValue = {
+  /** Absolute playhead ms when every shape intro in the scene has finished. */
+  sceneIntroUntilMs: number;
+  /** Peer layers hide content while a Shape panel Preview is running. */
+  previewObjectId: string | null;
+  previewActive: boolean;
+};
+
+const ShapeIntroGateContext = createContext<ShapeIntroGateContextValue>({
+  sceneIntroUntilMs: 0,
+  previewObjectId: null,
+  previewActive: false,
+});
+
+/** Mirrored for withLayerMotion (plain fn, cannot useContext). */
+const shapeIntroGateRef: { current: ShapeIntroGateContextValue } = {
+  current: {
+    sceneIntroUntilMs: 0,
+    previewObjectId: null,
+    previewActive: false,
+  },
+};
+
 type EdgeSweepHoverContextValue = {
   setHoveredObjectId: (id: string | null) => void;
 };
@@ -184,6 +211,38 @@ type EdgeSweepHoverContextValue = {
 const EdgeSweepHoverContext = createContext<EdgeSweepHoverContextValue>({
   setHoveredObjectId: () => {},
 });
+
+/** CSS clip so media follows Shape Composer geometry (ellipse, rounded frame, etc.). */
+function shapeGeometryClipPath(
+  config: ShapeComposerConfig,
+  width: number,
+  height: number,
+): string | undefined {
+  const w = Math.max(1, width);
+  const h = Math.max(1, height);
+  switch (config.kind) {
+    case "ellipse":
+      return "ellipse(50% 50% at 50% 50%)";
+    case "circle": {
+      const pct = (Math.min(w, h) / Math.max(w, h)) * 50;
+      return w >= h
+        ? `ellipse(${pct}% 50% at 50% 50%)`
+        : `ellipse(50% ${pct}% at 50% 50%)`;
+    }
+    case "video_frame":
+    case "border_frame":
+    case "rounded_rectangle":
+    case "rectangle":
+    case "glass_panel":
+    case "image_mask":
+    case "video_mask": {
+      const r = resolveRadii(config, w, h).topLeft;
+      return r > 0.5 ? `inset(0 round ${r}px)` : undefined;
+    }
+    default:
+      return undefined;
+  }
+}
 
 function useShapePreviewClock(
   objectId: string,
@@ -202,7 +261,7 @@ function useShapePreviewClock(
   restAtEnd: boolean,
 ) {
   const total = Math.max(300, previewTotalMs);
-  const [rafMs, setRafMs] = useState(() => (restAtEnd ? total : 0));
+  const [rafMs, setRafMs] = useState(0);
   const [replayNonce, setReplayNonce] = useState(0);
   const [previewActive, setPreviewActive] = useState(false);
   const startRef = useRef<number | null>(null);
@@ -221,29 +280,19 @@ function useShapePreviewClock(
       window.removeEventListener(SHAPE_BEHAVIOR_REPLAY_EVENT, onReplay);
   }, [objectId]);
 
-  // Keep resting pose at end when reveal is on (content visible while editing).
+  // RAF only while Preview is active, or for looping (no-reveal) behaviors.
+  // Resting pose is derived during render — never setState on idle commits
+  // (that used to re-enter across every shape layer → max update depth).
   useEffect(() => {
-    if (!enabled || !needsClock) {
+    if (!enabled || !needsClock || isPlaying) {
       startRef.current = null;
-      setPreviewActive(false);
-      setRafMs(0);
+      setPreviewActive((active) => (active ? false : active));
       return;
     }
-    if (isPlaying) {
+
+    const shouldLoop = loopClock && !restAtEnd;
+    if (!previewActive && !shouldLoop) {
       startRef.current = null;
-      setPreviewActive(false);
-      return;
-    }
-    // Idle edit: show original layer (end of reveal) unless previewing.
-    if (restAtEnd && !previewActive && !loopClock) {
-      startRef.current = null;
-      setRafMs(total);
-      return;
-    }
-    // Looping behaviors (no reveal): keep running.
-    if (!previewActive && !loopClock) {
-      startRef.current = null;
-      setRafMs(total);
       return;
     }
 
@@ -254,7 +303,7 @@ function useShapePreviewClock(
       if (stopped) return;
       if (startRef.current == null) startRef.current = now;
       const elapsed = now - startRef.current;
-      if (loopClock && !restAtEnd) {
+      if (shouldLoop) {
         setRafMs(elapsed % total);
         raf = requestAnimationFrame(tick);
         return;
@@ -287,6 +336,8 @@ function useShapePreviewClock(
   if (!enabled) return 0;
   if (isPlaying) return playheadMs;
   if (!needsClock) return playheadMs;
+  // Idle edit: sit at end of reveal / one-shot timeline until Preview.
+  if (!previewActive && (restAtEnd || !loopClock)) return total;
   return rafMs;
 }
 
@@ -310,6 +361,7 @@ function SelectableShell({
   lightSweepCoverage?: EffectCoverageRect;
 }) {
   const clock = useContext(PreviewClockContext);
+  const shapeGate = useContext(ShapeIntroGateContext);
   const edgeHover = useContext(EdgeSweepHoverContext);
   const sampledEffects = sampleBroadcastEffects(getObjectEffectStack(object));
   const mergedStyle = mergeSampledEffectsIntoStyle(style ?? {}, sampledEffects);
@@ -324,10 +376,21 @@ function SelectableShell({
   const hasLoopingBehaviors = Boolean(
     shapeConfig?.behaviors?.some((b) => b.enabled && b.loop),
   );
+  const hasTravelBehavior = Boolean(
+    shapeConfig?.behaviors?.some(
+      (b) =>
+        b.enabled &&
+        (b.type === "travel_across" || b.type === "shape_cascade"),
+    ),
+  );
   const previewTotalMs = shapeConfig ? shapePreviewDurationMs(shapeConfig) : 0;
+  const revealDriving = Boolean(
+    shapeConfig?.enabled && revealCfg?.enabled && !hasTravelBehavior,
+  );
+  const selfGateMs = layerMotionGateMs(object);
   const needsShapeClock = Boolean(
     shapeConfig?.enabled &&
-      (revealCfg?.enabled || hasShapeBehaviors),
+      (revealDriving || hasShapeBehaviors || hasTravelBehavior || selfGateMs > 0),
   );
   const shapeClockMs = useShapePreviewClock(
     object.id,
@@ -335,35 +398,190 @@ function SelectableShell({
     needsShapeClock,
     previewTotalMs,
     clock.isPlaying,
-    clock.playheadMs,
-    hasLoopingBehaviors && !revealCfg?.enabled,
-    Boolean(revealCfg?.enabled),
+    Math.max(0, clock.playheadMs - object.start_ms),
+    (hasLoopingBehaviors && !revealCfg?.enabled) || hasTravelBehavior,
+    revealDriving || selfGateMs > 0,
   );
   const revealSample =
-    shapeOverlay && shapeConfig
-      ? sampleShapeReveal(shapeConfig, shapeClockMs, { overlay: true })
+    shapeOverlay && shapeConfig && revealDriving
+      ? sampleShapeReveal(shapeConfig, shapeClockMs, {
+          overlay: true,
+          width: Math.max(1, object.transform.width),
+          height: Math.max(1, object.transform.height),
+        })
       : null;
   const isFrameOnly =
     shapeConfig != null &&
+    !revealDriving &&
     (shapeConfig.fillMode === "none" ||
       shapeConfig.fill === "transparent" ||
       shapeConfig.kind === "video_frame");
-  const revealDriving = Boolean(revealCfg?.enabled);
+  const isMainVideoLayer =
+    object.metadata?.layer === "main_video_container" ||
+    object.metadata?.component_slug === "gnn-001-main-video-container" ||
+    object.metadata?.region_key === "main-video" ||
+    object.metadata?.component_slug === "gnn-001-main-video" ||
+    object.name === "Main Video Container";
+  const isMediaLayer =
+    isMainVideoLayer ||
+    object.object_type === "video" ||
+    object.object_type === "image";
+  // Rim-only mode keeps media visible under the stroke. Reveal mode hides
+  // media until the cover shape fully exits (same as other layers).
+  const keepMediaVisible = isFrameOnly || (isMediaLayer && !revealDriving);
   const revealActive = Boolean(revealDriving && revealSample);
-  const originalHidden =
+  const localPlayheadMs = Math.max(0, clock.playheadMs - object.start_ms);
+  const selfIntroActive =
+    selfGateMs > 0 &&
+    (clock.isPlaying
+      ? localPlayheadMs < selfGateMs
+      : needsShapeClock && shapeClockMs < selfGateMs);
+  // Other layers' shape intros must not blank the video.
+  const peerIntroActive =
+    !isMediaLayer &&
+    ((clock.isPlaying &&
+      shapeGate.sceneIntroUntilMs > 0 &&
+      clock.playheadMs < shapeGate.sceneIntroUntilMs) ||
+      (shapeGate.previewActive &&
+        shapeGate.previewObjectId != null &&
+        shapeGate.previewObjectId !== object.id));
+  // Hide content only while the cover is fully on (entrance/hold).
+  // During exit, content is already underneath so the handoff is seamless.
+  const hideForOwnReveal =
     revealActive &&
     revealSample != null &&
-    revealSample.phase !== "revealed";
-  // Cover original fill while shape is intro/hold/exit.
-  const shapeCovering = originalHidden && !isFrameOnly;
-  // Original layer content only after shape fully exits (not during exit fade).
-  const contentOpacity = isFrameOnly
-    ? 1
+    (revealSample.phase === "entrance" || revealSample.phase === "hold");
+  const originalHidden = revealDriving
+    ? hideForOwnReveal
+    : keepMediaVisible
+      ? false
+      : selfIntroActive || peerIntroActive;
+  const shapeCovering = originalHidden && Boolean(shapeConfig);
+  const contentOpacity = originalHidden
+    ? 0
     : revealActive
-      ? revealSample?.phase === "revealed"
-        ? 1
-        : 0
+      ? (revealSample?.contentOpacity ?? 1)
       : 1;
+  const shapeIntroRunning =
+    originalHidden ||
+    (revealActive &&
+      revealSample != null &&
+      revealSample.phase !== "revealed") ||
+    (!revealDriving && hasShapeBehaviors && selfIntroActive);
+  const hasLightSweepBehavior = Boolean(
+    shapeConfig?.behaviors?.some(
+      (b) => b.enabled && b.type === "light_sweep",
+    ),
+  );
+  // Cover shapes and frame rims stay above media while they run.
+  const shapeAboveContent =
+    keepMediaVisible ||
+    shapeIntroRunning ||
+    hasLightSweepBehavior ||
+    Boolean(revealDriving);
+  const showShapeOverlay =
+    Boolean(shapeOverlay && shapeConfig?.enabled) &&
+    (isFrameOnly ||
+      keepMediaVisible ||
+      revealSample == null ||
+      Boolean(revealSample?.shapeVisible) ||
+      (!revealDriving && hasShapeBehaviors) ||
+      (revealDriving &&
+        revealSample != null &&
+        revealSample.phase !== "revealed"));
+
+  const shapeClock =
+    needsShapeClock ? shapeClockMs : Math.max(0, clock.playheadMs - object.start_ms);
+  const behaviorSample =
+    shapeOverlay && shapeConfig?.enabled
+      ? sampleShapeBehaviors(shapeConfig, shapeClock, {
+          width: Math.max(1, object.transform.width),
+          height: Math.max(1, object.transform.height),
+        })
+      : null;
+
+  // Drive the video/image itself with shape motion + geometry clip.
+  // Otherwise Shape Composer only paints a faint stroke and "only shows video".
+  const mediaShapeStyle: React.CSSProperties =
+    keepMediaVisible && shapeConfig?.enabled && behaviorSample
+      ? {
+          transformOrigin: behaviorSample.transformOrigin || "center center",
+          transform: behaviorSample.hideHostShape
+            ? undefined
+            : `translate3d(${
+                (revealSample &&
+                (revealSample.phase === "exit" ||
+                  revealSample.phase === "revealed")
+                  ? 0
+                  : behaviorSample.translateX) +
+                (revealSample?.shapeTranslateX ?? 0)
+              }px, ${
+                (revealSample &&
+                (revealSample.phase === "exit" ||
+                  revealSample.phase === "revealed")
+                  ? 0
+                  : behaviorSample.translateY) +
+                (revealSample?.shapeTranslateY ?? 0)
+              }px, 0) scale(${
+                (revealSample &&
+                (revealSample.phase === "exit" ||
+                  revealSample.phase === "revealed")
+                  ? 1
+                  : behaviorSample.scaleX) *
+                (revealSample?.shapeScaleX ?? 1)
+              }, ${
+                (revealSample &&
+                (revealSample.phase === "exit" ||
+                  revealSample.phase === "revealed")
+                  ? 1
+                  : behaviorSample.scaleY) *
+                (revealSample?.shapeScaleY ?? 1)
+              })`,
+          clipPath:
+            behaviorSample.clipPath ??
+            shapeGeometryClipPath(
+              shapeConfig,
+              object.transform.width,
+              object.transform.height,
+            ),
+          WebkitClipPath:
+            behaviorSample.clipPath ??
+            shapeGeometryClipPath(
+              shapeConfig,
+              object.transform.width,
+              object.transform.height,
+            ),
+          opacity:
+            contentOpacity *
+            (behaviorSample.hideHostShape ? 0 : 1) *
+            (originalHidden ? 0 : behaviorSample.opacity),
+          overflow: "hidden",
+          willChange: "transform, opacity, clip-path",
+          visibility: originalHidden ? "hidden" : "visible",
+          pointerEvents: originalHidden ? "none" : undefined,
+        }
+      : keepMediaVisible && shapeConfig?.enabled
+        ? {
+            clipPath: shapeGeometryClipPath(
+              shapeConfig,
+              object.transform.width,
+              object.transform.height,
+            ),
+            WebkitClipPath: shapeGeometryClipPath(
+              shapeConfig,
+              object.transform.width,
+              object.transform.height,
+            ),
+            overflow: "hidden",
+            opacity: contentOpacity,
+            visibility: contentOpacity <= 0 ? "hidden" : "visible",
+            pointerEvents: contentOpacity <= 0 ? "none" : undefined,
+          }
+        : {
+            opacity: contentOpacity,
+            visibility: contentOpacity <= 0 ? "hidden" : "visible",
+            pointerEvents: contentOpacity <= 0 ? "none" : undefined,
+          };
 
   return (
     <div
@@ -386,9 +604,11 @@ function SelectableShell({
         // Expanded light sweep draws outside the text box.
         overflow: shapeCovering
           ? "hidden"
-          : expandLightSweep
+          : revealActive && revealSample?.phase === "exit"
             ? "visible"
-            : mergedStyle.overflow,
+            : expandLightSweep
+              ? "visible"
+              : mergedStyle.overflow,
         cursor: interactive ? "pointer" : undefined,
         outline: selected && interactive ? "2px solid transparent" : undefined,
         willChange: mergedStyle.willChange ?? "transform, opacity, filter",
@@ -406,19 +626,14 @@ function SelectableShell({
     >
       <div
         className="relative z-[1] size-full min-h-0 min-w-0"
-        style={{
-          opacity: contentOpacity,
-          visibility: contentOpacity <= 0 ? "hidden" : "visible",
-          pointerEvents: contentOpacity <= 0 ? "none" : undefined,
-        }}
+        style={mediaShapeStyle}
         aria-hidden={contentOpacity <= 0}
       >
+        {/* Keep media mounted under the cover so reveal does not remount
+            the video into a blank/loading frame after shape exit. */}
         {children}
       </div>
-      {shapeOverlay &&
-      (revealSample == null ||
-        revealSample.shapeVisible ||
-        (!revealDriving && hasShapeBehaviors)) ? (
+      {showShapeOverlay ? (
         <ShapeRenderer
           object={object}
           overlay
@@ -426,20 +641,28 @@ function SelectableShell({
           isPlaying={clock.isPlaying}
           useExternalClock={needsShapeClock}
           className={
-            revealDriving &&
-            revealSample &&
-            revealSample.phase !== "revealed"
+            shapeAboveContent
               ? "pointer-events-none absolute inset-0 z-[5]"
               : "pointer-events-none absolute inset-0 z-0"
           }
         />
       ) : null}
-      <BroadcastEffectOverlays
-        overlays={sampledEffects.overlays}
-        clockMs={clock.playheadMs}
-        isPlaying={clock.isPlaying}
-        lightSweepCoverage={lightSweepCoverage}
-      />
+      {!originalHidden ? (
+        <div
+          className={
+            expandLightSweep
+              ? "pointer-events-none absolute inset-0 z-[6] overflow-visible"
+              : "pointer-events-none absolute inset-0 z-[6] overflow-hidden"
+          }
+        >
+          <BroadcastEffectOverlays
+            overlays={sampledEffects.overlays}
+            clockMs={clock.playheadMs}
+            isPlaying={clock.isPlaying}
+            lightSweepCoverage={lightSweepCoverage}
+          />
+        </div>
+      ) : null}
     </div>
   );
 }
@@ -492,6 +715,49 @@ function PreviewEdgeSweepLayer({
   );
 }
 
+/** ms to wait after layer start before layer motion entrance may begin. */
+function layerMotionGateMs(object: SceneObject): number {
+  const shape = getShapeConfig(object);
+  if (!shape.enabled) return 0;
+  if (
+    shape.behaviors?.some(
+      (b) =>
+        b.enabled &&
+        (b.type === "travel_across" || b.type === "shape_cascade"),
+    )
+  ) {
+    return 0;
+  }
+  const reveal = resolveRevealConfig(shape);
+  // Frame-rim mode (no reveal): don't stall the scene.
+  if (
+    !reveal.enabled &&
+    (shape.kind === "video_frame" ||
+      object.metadata?.layer === "main_video_container" ||
+      object.metadata?.component_slug === "gnn-001-main-video-container" ||
+      object.name === "Main Video Container")
+  ) {
+    return 0;
+  }
+  if (reveal.enabled) return shapeRevealTotalMs(shape);
+  return (shape.behaviors ?? [])
+    .filter((b) => b.enabled && !b.loop && b.type !== "reveal_exit")
+    .reduce(
+      (max, b) =>
+        Math.max(max, b.delayMs + b.durationMs / Math.max(0.05, b.speed)),
+      0,
+    );
+}
+
+/** Absolute playhead time when all shape intros in the scene have finished. */
+function sceneShapeIntroUntilMs(objects: SceneObject[]): number {
+  return objects.reduce((max, object) => {
+    const gate = layerMotionGateMs(object);
+    if (gate <= 0) return max;
+    return Math.max(max, object.start_ms + gate);
+  }, 0);
+}
+
 /** GPU-friendly motion overlay — translate/scale/opacity, no layout reflow. */
 function withLayerMotion(
   style: React.CSSProperties,
@@ -499,21 +765,32 @@ function withLayerMotion(
   playheadMs: number,
   motionMode: "playback" | "edit" = "edit",
 ): React.CSSProperties {
-  const motion = sampleLayerMotion(object, playheadMs, { mode: motionMode });
+  const selfGate = layerMotionGateMs(object);
+  const peerGate = Math.max(
+    0,
+    shapeIntroGateRef.current.sceneIntroUntilMs - object.start_ms,
+  );
+  const gateAfterMs = Math.max(selfGate, peerGate);
+  const localMs = Math.max(0, playheadMs - object.start_ms);
+  const gated = gateAfterMs > 0 && localMs < gateAfterMs;
+  const motion = sampleLayerMotion(object, playheadMs, {
+    mode: motionMode,
+    gateAfterMs,
+  });
   const baseOpacity =
     typeof style.opacity === "number"
       ? style.opacity
       : object.transform.opacity;
   return {
     ...style,
-    // Perspective + rotateX/Y/Z for true 3D idle; object.rotation remains base Z.
     transform: `perspective(700px) translate3d(${motion.translateX}px, ${motion.translateY}px, 0) scale(${object.transform.scale * motion.scale}) rotateX(${motion.rotateX}deg) rotateY(${motion.rotateY}deg) rotateZ(${object.transform.rotation + motion.rotateZ}deg)`,
     transformOrigin: motion.transformOrigin ?? "center center",
     transformStyle: "preserve-3d",
-    opacity: baseOpacity * motion.opacity,
-    clipPath: motion.clipPath ?? style.clipPath,
-    filter: motion.filter ?? style.filter,
-    visibility: motion.visible ? style.visibility : "hidden",
+    // Shell stays visible so the shape can render; content is hidden in SelectableShell.
+    opacity: gated ? baseOpacity : baseOpacity * motion.opacity,
+    clipPath: gated ? style.clipPath : (motion.clipPath ?? style.clipPath),
+    filter: gated ? style.filter : (motion.filter ?? style.filter),
+    visibility: gated || motion.visible ? style.visibility : "hidden",
     willChange: "transform, opacity",
     backfaceVisibility: "hidden",
   };
@@ -605,16 +882,16 @@ function PreviewObject({
   const optionalMediaRef = useRef<HTMLElement | null>(null);
 
   useEffect(() => {
-    setOptionalSlideIndex(manualSlideIndex);
-  }, [manualSlideIndex, bindings.optional_info_image, object.id]);
-
-  useEffect(() => {
     if (optionalSlides.length <= 1) return;
     const timer = window.setInterval(() => {
       setOptionalSlideIndex((index) => (index + 1) % optionalSlides.length);
     }, intervalMs);
     return () => window.clearInterval(timer);
-  }, [intervalMs, optionalSlides]);
+  }, [intervalMs, optionalSlides.length]);
+
+  useEffect(() => {
+    setOptionalSlideIndex(manualSlideIndex);
+  }, [manualSlideIndex, bindings.optional_info_image, object.id]);
 
   useEffect(() => {
     if (!isOptionalInfoRegion || transitionMs <= 0) return;
@@ -640,7 +917,7 @@ function PreviewObject({
   }, [
     isOptionalInfoRegion,
     optionalSlideIndex,
-    optionalSlides,
+    optionalSlides.length,
     transitionMs,
     transitionStyle,
   ]);
@@ -786,6 +1063,7 @@ function PreviewObject({
   }
 
   if (isMainVideoContainerObject(object)) {
+    const shapeActive = shouldShowShapeOverlay(object);
     return (
       <SelectableShell
         object={object}
@@ -816,6 +1094,7 @@ function PreviewObject({
           onBrowseMedia={
             onBrowseMedia ? () => onBrowseMedia(object) : undefined
           }
+          suppressFrameChrome={shapeActive}
         />
       </SelectableShell>
     );
@@ -1431,6 +1710,55 @@ export function StoryLivePreview({
     [visibleObjects],
   );
 
+  const sceneIntroUntilMs = useMemo(
+    () => sceneShapeIntroUntilMs(patchedObjects),
+    [patchedObjects],
+  );
+
+  const [shapePreview, setShapePreview] = useState<{
+    objectId: string;
+    holdMs: number;
+  } | null>(null);
+
+  useEffect(() => {
+    const onReplay = (event: Event) => {
+      const objectId = (event as CustomEvent<{ objectId?: string }>).detail
+        ?.objectId;
+      if (!objectId) return;
+      const target = patchedObjects.find((object) => object.id === objectId);
+      if (!target) return;
+      const shape = getShapeConfig(target);
+      const holdMs = Math.max(
+        layerMotionGateMs(target),
+        shapePreviewDurationMs(shape),
+        300,
+      );
+      setShapePreview({ objectId, holdMs });
+    };
+    window.addEventListener(SHAPE_BEHAVIOR_REPLAY_EVENT, onReplay);
+    return () =>
+      window.removeEventListener(SHAPE_BEHAVIOR_REPLAY_EVENT, onReplay);
+  }, [patchedObjects]);
+
+  useEffect(() => {
+    if (!shapePreview) return;
+    const timer = window.setTimeout(() => {
+      setShapePreview(null);
+    }, shapePreview.holdMs + 80);
+    return () => window.clearTimeout(timer);
+  }, [shapePreview]);
+
+  const shapeIntroGateValue = useMemo<ShapeIntroGateContextValue>(
+    () => ({
+      sceneIntroUntilMs,
+      previewObjectId: shapePreview?.objectId ?? null,
+      previewActive: Boolean(shapePreview),
+    }),
+    [sceneIntroUntilMs, shapePreview],
+  );
+
+  shapeIntroGateRef.current = shapeIntroGateValue;
+
   const showBackgroundFallback = isGnn001 && !hasBackgroundLayer;
   const frameFallbackObjects = useMemo(
     () => (isGnn001 && !hasFrameLayer ? createGnn001FrameObjects() : []),
@@ -1450,16 +1778,26 @@ export function StoryLivePreview({
     const container = containerRef.current;
     if (!container) return;
 
+    let frame = 0;
     const updateScale = () => {
-      const { width, height } = container.getBoundingClientRect();
-      if (width <= 0 || height <= 0) return;
-      setFitScale(Math.min(width / artboard.width, height / artboard.height));
+      // Defer out of ResizeObserver — sync setState there can recurse into
+      // "Maximum update depth exceeded" when layout oscillates.
+      cancelAnimationFrame(frame);
+      frame = requestAnimationFrame(() => {
+        const { width, height } = container.getBoundingClientRect();
+        if (width <= 0 || height <= 0) return;
+        const next = Math.min(width / artboard.width, height / artboard.height);
+        setFitScale((prev) => (Math.abs(prev - next) < 0.001 ? prev : next));
+      });
     };
 
     updateScale();
     const observer = new ResizeObserver(updateScale);
     observer.observe(container);
-    return () => observer.disconnect();
+    return () => {
+      cancelAnimationFrame(frame);
+      observer.disconnect();
+    };
   }, [artboard.width, artboard.height, fillParent]);
 
   const clockValue = useMemo(
@@ -1469,6 +1807,7 @@ export function StoryLivePreview({
 
   const artboardContent = mounted ? (
     <PreviewClockContext.Provider value={clockValue}>
+    <ShapeIntroGateContext.Provider value={shapeIntroGateValue}>
     <EdgeSweepHoverContext.Provider value={edgeHoverValue}>
     <>
       {showBackgroundFallback ? (
@@ -1563,6 +1902,7 @@ export function StoryLivePreview({
       />
     </>
     </EdgeSweepHoverContext.Provider>
+    </ShapeIntroGateContext.Provider>
     </PreviewClockContext.Provider>
   ) : null;
 

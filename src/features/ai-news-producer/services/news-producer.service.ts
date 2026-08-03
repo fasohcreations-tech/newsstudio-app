@@ -8,6 +8,7 @@ import { generateText } from "@/features/ai/services/ai-orchestrator";
 import { getPromptTemplate } from "@/features/ai/services/prompt-manager";
 import {
   createContentObject,
+  CONTENT_OBJECT_SELECT,
   listContentObjects,
   updateContentObject,
 } from "@/features/content/services/content.service";
@@ -294,7 +295,7 @@ export async function updateProducerBody(
 ): Promise<NewsProducerServiceResult<NewsProducerOutput>> {
   const { data: current, error } = await client
     .from("content_objects")
-    .select("*")
+    .select(CONTENT_OBJECT_SELECT)
     .eq("id", args.outputId)
     .is("deleted_at", null)
     .maybeSingle();
@@ -339,7 +340,7 @@ export async function regenerateProducerOutput(
 ): Promise<NewsProducerServiceResult<NewsProducerOutput>> {
   const { data: current, error } = await client
     .from("content_objects")
-    .select("*")
+    .select(CONTENT_OBJECT_SELECT)
     .eq("id", args.outputId)
     .is("deleted_at", null)
     .maybeSingle();
@@ -384,7 +385,7 @@ async function patchApproval(
 ): Promise<NewsProducerServiceResult<NewsProducerOutput>> {
   const { data: current, error } = await client
     .from("content_objects")
-    .select("*")
+    .select(CONTENT_OBJECT_SELECT)
     .eq("id", args.outputId)
     .is("deleted_at", null)
     .maybeSingle();

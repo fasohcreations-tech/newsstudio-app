@@ -223,7 +223,10 @@ export function SceneLibraryPanel({
               </div>
               <p className="text-[10px] text-muted-foreground">
                 {(scene.duration_ms / 1000).toFixed(1)}s ·{" "}
-                {scene.scene_document.layers.length} layers
+                {typeof scene.metadata?.layer_count === "number"
+                  ? scene.metadata.layer_count
+                  : (scene.scene_document?.layers?.length ?? 0)}{" "}
+                layers
               </p>
             </button>
             <div className="flex justify-end border-t border-border/40 px-2 py-1">

@@ -9,6 +9,7 @@ import { Button, buttonVariants } from "@/components/ui/button";
 import { RelativeTime } from "@/features/newsroom/components/relative-time";
 import type { StoryWithRelations } from "@/features/newsroom/types/story.types";
 import { AIWorkspacePanel } from "@/features/ai-workspace/components/ai-workspace-panel";
+import { StoryIntelligencePanel } from "@/features/ai/intelligence/components/story-intelligence-panel";
 import { cn } from "@/lib/utils";
 
 type StoryWorkspaceSidebarProps = {
@@ -33,6 +34,17 @@ export function StoryWorkspaceSidebar({
       </div>
       <ScrollArea className="flex-1">
         <div className="space-y-5 p-4">
+          <section className="space-y-2">
+            <StoryIntelligencePanel
+              storyId={story.id}
+              title={story.title}
+              body={story.summary ?? undefined}
+              language={story.language ?? "en"}
+            />
+          </section>
+
+          <Separator />
+
           <section className="space-y-2">
             <AIWorkspacePanel storyId={story.id} storyTitle={story.title} />
           </section>

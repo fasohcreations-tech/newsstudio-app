@@ -505,13 +505,17 @@ function sampledFromIdle(
  * @param options.mode
  *   - `playback` — sample entrance/idle/exit at the playhead (live preview)
  *   - `edit` — post-entrance resting pose so the canvas stays visible while paused
+ * @param options.gateAfterMs
+ *   Hold an identity pose for this many ms after object.start_ms (used so shape
+ *   reveal / behavior exit can finish before layer motion entrance begins).
  */
 export function sampleLayerMotion(
   object: SceneObject,
   playheadMs: number,
-  options?: { mode?: "playback" | "edit" },
+  options?: { mode?: "playback" | "edit"; gateAfterMs?: number },
 ): SampledMotionStyle {
   const mode = options?.mode ?? "playback";
+  const gateAfterMs = Math.max(0, options?.gateAfterMs ?? 0);
   const motion = getLayerMotionConfig(object);
   const speed = motion.speed;
   const start = object.start_ms;
@@ -537,6 +541,24 @@ export function sampleLayerMotion(
   const entranceDelay = Math.max(0, motion.entrance.delayMs / speed);
   const exitDur = Math.max(0, motion.exit.durationMs / speed);
   const exitStart = span - exitDur;
+  const local = playheadMs - start;
+
+  // Shape reveal / behavior gate runs in both edit + playback so scrubbing
+  // mid-intro cannot start layer entrance early.
+  if (gateAfterMs > 0 && local < gateAfterMs) {
+    return {
+      opacity: 1,
+      translateX: 0,
+      translateY: 0,
+      scale: 1,
+      rotate: 0,
+      rotateX: 0,
+      rotateY: 0,
+      rotateZ: 0,
+      transform: composeTransform(0, 0, 1),
+      visible: true,
+    };
+  }
 
   // Edit mode: fully visible resting pose (entrance done, exit not started).
   if (mode === "edit") {
@@ -557,11 +579,34 @@ export function sampleLayerMotion(
     );
   }
 
-  const local = playheadMs - start;
+  // Entrance / idle clocks start after the gate; exit still uses layer end.
+  const motionLocal = local - gateAfterMs;
+  // Shape exit already revealed the layer — don't fade it in again.
+  const afterShapeGate = gateAfterMs > 0;
+  const entranceType =
+    afterShapeGate &&
+    (motion.entrance.type === "fade_in" || motion.entrance.type === "opacity")
+      ? "none"
+      : motion.entrance.type;
 
   // Pre-entrance (delay)
-  if (local < entranceDelay && motion.entrance.type !== "none") {
-    const hidden = entranceDelta(motion.entrance.type, 0);
+  if (motionLocal < entranceDelay && entranceType !== "none") {
+    if (afterShapeGate) {
+      // Hold full opacity; transform entrance starts after delay.
+      return {
+        opacity: 1,
+        translateX: 0,
+        translateY: 0,
+        scale: 1,
+        rotate: 0,
+        rotateX: 0,
+        rotateY: 0,
+        rotateZ: 0,
+        transform: composeTransform(0, 0, 1),
+        visible: true,
+      };
+    }
+    const hidden = entranceDelta(entranceType, 0);
     return {
       ...hidden,
       rotate: 0,
@@ -579,15 +624,15 @@ export function sampleLayerMotion(
   }
 
   // Entrance
-  if (
-    motion.entrance.type !== "none" &&
-    local < entranceDelay + entranceDur
-  ) {
-    const raw = clamp01((local - entranceDelay) / Math.max(1, entranceDur));
+  if (entranceType !== "none" && motionLocal < entranceDelay + entranceDur) {
+    const raw = clamp01(
+      (motionLocal - entranceDelay) / Math.max(1, entranceDur),
+    );
     const t = applyEasing(raw, motion.entrance.easing);
-    const delta = entranceDelta(motion.entrance.type, t);
+    const delta = entranceDelta(entranceType, t);
     return {
-      opacity: delta.opacity,
+      // Keep fully opaque after shape reveal; still allow slide/scale/wipe.
+      opacity: afterShapeGate ? 1 : delta.opacity,
       translateX: delta.translateX,
       translateY: delta.translateY,
       scale: delta.scale,
@@ -630,7 +675,7 @@ export function sampleLayerMotion(
   }
 
   // Idle (between entrance end and exit start)
-  const idleLocal = local - entranceDelay - entranceDur;
+  const idleLocal = motionLocal - entranceDelay - entranceDur;
   return sampledFromIdle(
     idleDelta(
       motion.idle.type,

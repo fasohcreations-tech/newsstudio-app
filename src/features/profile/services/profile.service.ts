@@ -12,7 +12,9 @@ export async function getCurrentProfile(
 ): Promise<{ profile: Profile | null; error: string | null }> {
   const { data, error } = await client
     .from("profiles")
-    .select("*")
+    .select(
+      "id, email, full_name, avatar_url, preferred_locale, timezone, created_at, updated_at, deleted_at",
+    )
     .eq("id", userId)
     .is("deleted_at", null)
     .maybeSingle();
@@ -38,7 +40,9 @@ export async function updateCurrentProfile(
     })
     .eq("id", userId)
     .is("deleted_at", null)
-    .select("*")
+    .select(
+      "id, email, full_name, avatar_url, preferred_locale, timezone, created_at, updated_at, deleted_at",
+    )
     .single();
 
   if (error) {

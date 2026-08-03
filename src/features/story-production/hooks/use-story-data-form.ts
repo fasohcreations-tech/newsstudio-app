@@ -56,6 +56,10 @@ function initialStoryData(scene: ComposerScene): StoryDataRecord {
   return base;
 }
 
+function storyDataEqual(a: StoryDataRecord, b: StoryDataRecord) {
+  return JSON.stringify(a) === JSON.stringify(b);
+}
+
 /**
  * Story Form reactive state — Single Source of Truth for Module 3.7.
  */
@@ -68,6 +72,10 @@ export function useStoryDataForm({
   onBindingsChangeRef.current = onBindingsChange;
   const existingBindingsRef = useRef(scene.resolved_bindings);
   existingBindingsRef.current = scene.resolved_bindings;
+  const lastEmittedRef = useRef<{
+    bindings: string;
+    data: string;
+  } | null>(null);
 
   const [data, setData] = useState<StoryDataRecord>(() =>
     initialStoryData(scene),
@@ -88,6 +96,16 @@ export function useStoryDataForm({
       return;
     }
     const merged = mergeStoryDataBindings(data, existingBindingsRef.current);
+    const bindingsKey = JSON.stringify(merged);
+    const dataKey = JSON.stringify(data);
+    if (
+      lastEmittedRef.current &&
+      lastEmittedRef.current.bindings === bindingsKey &&
+      lastEmittedRef.current.data === dataKey
+    ) {
+      return;
+    }
+    lastEmittedRef.current = { bindings: bindingsKey, data: dataKey };
     onBindingsChangeRef.current(merged, data);
   }, [data]);
 
@@ -107,29 +125,29 @@ export function useStoryDataForm({
       !stored ||
       (isStoryUnpopulated(current) && engineVersion !== STORY_ENGINE_VERSION);
 
+    let next: StoryDataRecord;
     if (!needsDemo && stored) {
-      const hydrated = bindingsToStoryData(scene.resolved_bindings, {
+      next = bindingsToStoryData(scene.resolved_bindings, {
         ...createEmptyStoryData(),
         ...stored,
       });
-      setData(hydrated);
-      return;
+    } else if (!needsDemo) {
+      next = initialStoryData(scene);
+    } else {
+      next = createDemoStoryData(scene.id.slice(0, 8));
     }
 
-    if (!needsDemo) {
-      setData(initialStoryData(scene));
-      return;
-    }
-
-    const demo = createDemoStoryData(scene.id.slice(0, 8));
-    setData(demo);
+    setData((prev) => (storyDataEqual(prev, next) ? prev : next));
     // Only re-seed when switching scenes — not when bindings/metadata update.
     // eslint-disable-next-line react-hooks/exhaustive-deps -- scene.id gates re-seed
   }, [scene.id]);
 
   const updateField = useCallback(
     <K extends keyof StoryDataRecord>(key: K, value: StoryDataRecord[K]) => {
-      setData((prev) => ({ ...prev, [key]: value }));
+      setData((prev) => {
+        if (Object.is(prev[key], value)) return prev;
+        return { ...prev, [key]: value };
+      });
     },
     [],
   );

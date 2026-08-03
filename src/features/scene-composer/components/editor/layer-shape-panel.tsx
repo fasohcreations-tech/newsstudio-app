@@ -33,6 +33,9 @@ import {
   SHAPE_KIND_OPTIONS,
   SHAPE_LIBRARY_CATEGORIES,
   SHAPE_PRESETS,
+  SHAPE_REVEAL_EXIT_DIRECTION_OPTIONS,
+  SHAPE_REVEAL_EXIT_STYLE_OPTIONS,
+  SHAPE_TRAVEL_DIRECTION_OPTIONS,
   addPathPoint,
   applyShapeLibraryItem,
   applyShapePreset,
@@ -41,6 +44,8 @@ import {
   createDefaultReveal,
   createShapeBehavior,
   createShapeFromLibraryItem,
+  defaultRevealEntranceBehavior,
+  defaultRevealExitBehavior,
   deletePathPoint,
   disableShapeComposer,
   enableShapeComposer,
@@ -51,14 +56,18 @@ import {
   movePathPoint,
   nearestAnchorPreset,
   anchorPresetToPoint,
+  normalizeRevealExit,
   patchShapeConfig,
   resolveAnchorPoint,
   resolvePlacement,
   resolveRevealConfig,
+  resolveRevealExit,
   smoothPathPoint,
   snapObjectToGrid,
+  syncRevealExitBehavior,
   toggleShapeHide,
   toggleShapeLock,
+  withExclusiveEntranceBehavior,
 } from "@/features/scene-composer/lib/shape-composer";
 import { SHAPE_BEHAVIOR_REPLAY_EVENT } from "@/features/scene-composer/components/editor/shape-renderer";
 import type {
@@ -66,8 +75,11 @@ import type {
   ShapeBehaviorType,
   ShapeKind,
   ShapeLibraryCategory,
+  ShapeRevealExitDirection,
   ShapeRevealExitStyle,
+  ShapeTravelDirection,
 } from "@/features/scene-composer/lib/shape-composer";
+import { isTravelBehaviorType } from "@/features/scene-composer/lib/shape-composer";
 import type { SceneObject } from "@/features/scene-composer/types/scene-composer.types";
 
 type LayerShapePanelProps = {
@@ -129,7 +141,11 @@ function NumberField({
 }
 
 type ShapeSection =
-  | "general"
+  | "basics"
+  | "layout"
+  | "colors"
+  | "reveal"
+  | "behaviors"
   | "geometry"
   | "fill"
   | "border"
@@ -139,6 +155,23 @@ type ShapeSection =
   | "path"
   | "library"
   | "presets";
+
+const SHAPE_PANEL_TABS: Array<{ id: ShapeSection; label: string }> = [
+  { id: "basics", label: "Basics" },
+  { id: "layout", label: "Layout" },
+  { id: "colors", label: "Colors" },
+  { id: "reveal", label: "Reveal" },
+  { id: "behaviors", label: "Behaviors" },
+  { id: "geometry", label: "Geometry" },
+  { id: "fill", label: "Fill" },
+  { id: "border", label: "Border" },
+  { id: "gradient", label: "Gradient" },
+  { id: "glass", label: "Glass" },
+  { id: "corners", label: "Corners" },
+  { id: "path", label: "Path" },
+  { id: "library", label: "Library" },
+  { id: "presets", label: "Presets" },
+];
 
 /**
  * Shape tab — procedural Shape Composer controls.
@@ -155,9 +188,10 @@ export function LayerShapePanel({
 }: LayerShapePanelProps) {
   const config = getShapeConfig(object);
   const reveal = resolveRevealConfig(config);
+  const revealExit = resolveRevealExit(config, reveal);
   const anchorPoint = resolveAnchorPoint(config);
   const placement = resolvePlacement(config);
-  const [section, setSection] = useState<ShapeSection>("general");
+  const [section, setSection] = useState<ShapeSection | null>(null);
   const [libraryCategory, setLibraryCategory] = useState<
     ShapeLibraryCategory | "all"
   >("all");
@@ -169,7 +203,10 @@ export function LayerShapePanel({
   );
 
   const commit = (next: SceneObject) => {
-    // Replace identity fields so live preview always receives a new object.
+    // Helpers like convertShapeKind / enableShapeComposer return the same
+    // reference when nothing changed. Always-spreading here used to re-patch
+    // → re-render → Select sync → convert again → max update depth.
+    if (next === object) return;
     onObjectPatch(next.id, {
       style: { ...next.style },
       transform: { ...next.transform },
@@ -186,6 +223,14 @@ export function LayerShapePanel({
     // Any Shape tab edit writes config and keeps live preview active.
     const base = config.enabled ? object : enableShapeComposer(object);
     commit(patchShapeConfig(base, { ...partial, enabled: true }));
+  };
+
+  const requestShapePreview = () => {
+    window.dispatchEvent(
+      new CustomEvent(SHAPE_BEHAVIOR_REPLAY_EVENT, {
+        detail: { objectId: object.id },
+      }),
+    );
   };
 
   const patchTransform = (partial: Partial<SceneObject["transform"]>) => {
@@ -244,33 +289,37 @@ export function LayerShapePanel({
         </p>
       ) : null}
 
-      <div className="flex flex-wrap gap-1.5">
-        {(
-          [
-            ["general", "General"],
-            ["geometry", "Geometry"],
-            ["fill", "Fill"],
-            ["border", "Border"],
-            ["gradient", "Gradient"],
-            ["glass", "Glass"],
-            ["corners", "Corners"],
-            ["path", "Path"],
-            ["library", "Library"],
-            ["presets", "Presets"],
-          ] as const
-        ).map(([id, label]) => (
-          <Button
-            key={id}
-            type="button"
-            size="sm"
-            variant={section === id ? "default" : "secondary"}
-            className="h-8 text-[12px]"
-            onClick={() => setSection(id)}
-          >
-            {label}
-          </Button>
-        ))}
+      <div
+        role="tablist"
+        aria-label="Shape Composer panels"
+        className="flex flex-wrap gap-1 rounded-md border border-border/60 bg-muted/30 p-1"
+      >
+        {SHAPE_PANEL_TABS.map(({ id, label }) => {
+          const selected = section === id;
+          return (
+            <Button
+              key={id}
+              type="button"
+              role="tab"
+              aria-selected={selected}
+              size="sm"
+              variant={selected ? "default" : "ghost"}
+              className="h-7 px-2.5 text-[11px]"
+              onClick={() =>
+                setSection((current) => (current === id ? null : id))
+              }
+            >
+              {label}
+            </Button>
+          );
+        })}
       </div>
+
+      {!section ? (
+        <p className={EDITOR_UI.helper}>
+          Click a tab to open its settings. Click the same tab again to close.
+        </p>
+      ) : null}
 
       <div className="flex flex-wrap gap-2">
         <Button
@@ -337,20 +386,38 @@ export function LayerShapePanel({
 
       <Separator />
 
-      {section === "general" ? (
+      {section === "basics" ? (
         <section className="space-y-3">
           <Field label="Shape">
             <Select
               value={config.kind}
-              onValueChange={(value) =>
-                commit(convertShapeKind(object, value as ShapeKind))
-              }
+              onValueChange={(value) => {
+                if (!value || value === config.kind) return;
+                commit(convertShapeKind(object, value as ShapeKind));
+              }}
             >
               <SelectTrigger className={EDITOR_UI.input}>
                 <SelectValue />
               </SelectTrigger>
               <SelectContent>
-                {SHAPE_KIND_OPTIONS.map((opt) => (
+                {(object.metadata?.layer === "main_video_container" ||
+                object.metadata?.component_slug ===
+                  "gnn-001-main-video-container" ||
+                object.name === "Main Video Container"
+                  ? SHAPE_KIND_OPTIONS.filter((opt) =>
+                      [
+                        "video_frame",
+                        "border_frame",
+                        "rounded_rectangle",
+                        "rectangle",
+                        "ellipse",
+                        "circle",
+                        "video_mask",
+                        "image_mask",
+                      ].includes(opt.value),
+                    )
+                  : SHAPE_KIND_OPTIONS
+                ).map((opt) => (
                   <SelectItem key={opt.value} value={opt.value}>
                     {opt.label}
                   </SelectItem>
@@ -386,6 +453,31 @@ export function LayerShapePanel({
               onChange={(rotation) => patch({ rotation })}
             />
           </div>
+          <Field label="Material">
+            <Select
+              value={config.material}
+              onValueChange={(material) =>
+                patch({
+                  material: (material ?? "standard") as typeof config.material,
+                })
+              }
+            >
+              <SelectTrigger className={EDITOR_UI.input}>
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="standard">Standard</SelectItem>
+                <SelectItem value="glass">Glass</SelectItem>
+                <SelectItem value="metallic">Metallic</SelectItem>
+                <SelectItem value="broadcast_frame">Broadcast Frame</SelectItem>
+              </SelectContent>
+            </Select>
+          </Field>
+        </section>
+      ) : null}
+
+      {section === "layout" ? (
+        <section className="space-y-3">
           <Field label="Anchor preset">
             <Select
               value={config.anchor}
@@ -512,27 +604,11 @@ export function LayerShapePanel({
           <p className={EDITOR_UI.helper}>
             Place the shape anywhere inside the layer box.
           </p>
-          <Field label="Material">
-            <Select
-              value={config.material}
-              onValueChange={(material) =>
-                patch({
-                  material: (material ?? "standard") as typeof config.material,
-                })
-              }
-            >
-              <SelectTrigger className={EDITOR_UI.input}>
-                <SelectValue />
-              </SelectTrigger>
-              <SelectContent>
-                <SelectItem value="standard">Standard</SelectItem>
-                <SelectItem value="glass">Glass</SelectItem>
-                <SelectItem value="metallic">Metallic</SelectItem>
-                <SelectItem value="broadcast_frame">Broadcast Frame</SelectItem>
-              </SelectContent>
-            </Select>
-          </Field>
+        </section>
+      ) : null}
 
+      {section === "colors" ? (
+        <section className="space-y-3">
           <div className="grid grid-cols-2 gap-2">
             <Field label="Shape Color">
               <Input
@@ -597,7 +673,11 @@ export function LayerShapePanel({
               Original layer color shown after the shape exits.
             </p>
           </Field>
+        </section>
+      ) : null}
 
+      {section === "reveal" ? (
+        <section className="space-y-3">
           <div className="space-y-2 rounded-md border border-border/60 p-3">
             <div className="flex items-center justify-between gap-2">
               <div>
@@ -608,15 +688,43 @@ export function LayerShapePanel({
               </div>
               <Switch
                 checked={reveal.enabled}
-                onCheckedChange={(enabled) =>
+                onCheckedChange={(enabled) => {
+                  const nextReveal = createDefaultReveal({
+                    ...reveal,
+                    enabled,
+                  });
+                  const withExit = syncRevealExitBehavior(
+                    config.behaviors,
+                    nextReveal,
+                  );
+                  const needsCoverFill =
+                    enabled &&
+                    (config.fillMode === "none" ||
+                      config.fill === "transparent" ||
+                      !config.fill);
                   patch({
-                    reveal: createDefaultReveal({ ...reveal, enabled }),
+                    reveal: nextReveal,
+                    ...(needsCoverFill
+                      ? {
+                          fillMode: "solid" as const,
+                          fill: "#1D4ED8",
+                          borderPadding: 0,
+                        }
+                      : enabled
+                        ? { borderPadding: 0 }
+                        : null),
                     behaviors:
-                      enabled && config.behaviors.length === 0
-                        ? [createShapeBehavior("panel_grow", { loop: false })]
-                        : config.behaviors,
-                  })
-                }
+                      enabled &&
+                      !withExit.some(
+                        (b) => b.type !== "reveal_exit" && b.enabled,
+                      )
+                        ? [
+                            defaultRevealEntranceBehavior(),
+                            ...withExit.filter((b) => b.type === "reveal_exit"),
+                          ]
+                        : withExit,
+                  });
+                }}
               />
             </div>
             {reveal.enabled ? (
@@ -644,39 +752,97 @@ export function LayerShapePanel({
                     label="Out ms"
                     value={reveal.exitDurationMs}
                     min={200}
-                    onChange={(exitDurationMs) =>
+                    onChange={(exitDurationMs) => {
+                      const nextReveal = { ...reveal, exitDurationMs };
                       patch({
-                        reveal: { ...reveal, exitDurationMs },
-                      })
-                    }
+                        reveal: nextReveal,
+                        behaviors: syncRevealExitBehavior(
+                          config.behaviors,
+                          nextReveal,
+                        ),
+                      });
+                      queueMicrotask(requestShapePreview);
+                    }}
                   />
                 </div>
-                <Field label="Exit style">
-                  <Select
-                    value={reveal.exitStyle}
-                    onValueChange={(exitStyle) =>
-                      patch({
-                        reveal: {
+                <div className="grid grid-cols-2 gap-2">
+                  <Field label="Exit style">
+                    <Select
+                      value={revealExit.style}
+                      onValueChange={(exitStyle) => {
+                        const style = (exitStyle ??
+                          "fade") as ShapeRevealExitStyle;
+                        const nextReveal = createDefaultReveal({
                           ...reveal,
-                          exitStyle: (exitStyle ??
-                            "fade") as ShapeRevealExitStyle,
-                        },
-                      })
-                    }
-                  >
-                    <SelectTrigger className={EDITOR_UI.input}>
-                      <SelectValue />
-                    </SelectTrigger>
-                    <SelectContent>
-                      <SelectItem value="fade">Fade out</SelectItem>
-                      <SelectItem value="scale_out">Scale out</SelectItem>
-                      <SelectItem value="wipe_up">Wipe up</SelectItem>
-                      <SelectItem value="wipe_down">Wipe down</SelectItem>
-                      <SelectItem value="slide_left">Slide left</SelectItem>
-                      <SelectItem value="reverse">Reverse grow</SelectItem>
-                    </SelectContent>
-                  </Select>
-                </Field>
+                          exitStyle: style,
+                          exitDirection:
+                            style === "wipe" || style === "slide"
+                              ? revealExit.direction === "center"
+                                ? style === "wipe"
+                                  ? "up"
+                                  : "left"
+                                : revealExit.direction
+                              : revealExit.direction,
+                        });
+                        patch({
+                          reveal: nextReveal,
+                          behaviors: syncRevealExitBehavior(
+                            config.behaviors,
+                            nextReveal,
+                          ),
+                        });
+                        queueMicrotask(requestShapePreview);
+                      }}
+                    >
+                      <SelectTrigger className={EDITOR_UI.input}>
+                        <SelectValue />
+                      </SelectTrigger>
+                      <SelectContent>
+                        {SHAPE_REVEAL_EXIT_STYLE_OPTIONS.map((opt) => (
+                          <SelectItem key={opt.value} value={opt.value}>
+                            {opt.label}
+                          </SelectItem>
+                        ))}
+                      </SelectContent>
+                    </Select>
+                  </Field>
+                  <Field label="Exit direction">
+                    <Select
+                      value={revealExit.direction}
+                      onValueChange={(exitDirection) => {
+                        const nextReveal = createDefaultReveal({
+                          ...reveal,
+                          exitStyle: revealExit.style,
+                          exitDirection: (exitDirection ??
+                            "center") as ShapeRevealExitDirection,
+                        });
+                        patch({
+                          reveal: nextReveal,
+                          behaviors: syncRevealExitBehavior(
+                            config.behaviors,
+                            nextReveal,
+                          ),
+                        });
+                        queueMicrotask(requestShapePreview);
+                      }}
+                    >
+                      <SelectTrigger className={EDITOR_UI.input}>
+                        <SelectValue />
+                      </SelectTrigger>
+                      <SelectContent>
+                        {SHAPE_REVEAL_EXIT_DIRECTION_OPTIONS.map((opt) => (
+                          <SelectItem key={opt.value} value={opt.value}>
+                            {opt.label}
+                          </SelectItem>
+                        ))}
+                      </SelectContent>
+                    </Select>
+                  </Field>
+                </div>
+                <p className={EDITOR_UI.helper}>
+                  Exit is also listed under Behaviors as Reveal Exit —
+                  wipe/slide use the direction above.
+                </p>
                 <Button
                   type="button"
                   size="sm"
@@ -695,72 +861,297 @@ export function LayerShapePanel({
               </>
             ) : null}
           </div>
+        </section>
+      ) : null}
 
+      {section === "behaviors" ? (
+        <section className="space-y-3">
           <div className="space-y-2">
             <p className={EDITOR_UI.label}>Shape behaviors</p>
             <p className={EDITOR_UI.helper}>
-              Toggle any combination — multiple can be active together.
+              Entrance behaviors are exclusive. Travel Across / Cascade spawn
+              multiple clones that cross the layer.
             </p>
             <div className="max-h-56 space-y-1 overflow-y-auto rounded-md border border-border/60 p-2">
               {SHAPE_BEHAVIOR_OPTIONS.map((opt) => {
                 const type = opt.value as ShapeBehaviorType;
                 const existing = config.behaviors.find((b) => b.type === type);
                 const checked = Boolean(existing?.enabled);
+                const isRevealExit = type === "reveal_exit";
+                const isTravel = isTravelBehaviorType(type);
+                const requestPreview = () => {
+                  window.dispatchEvent(
+                    new CustomEvent(SHAPE_BEHAVIOR_REPLAY_EVENT, {
+                      detail: { objectId: object.id },
+                    }),
+                  );
+                };
                 return (
                   <div
                     key={type}
-                    className="flex items-center justify-between gap-2 rounded-md px-2 py-1.5 hover:bg-muted/40"
+                    className="space-y-1.5 rounded-md px-2 py-1.5 hover:bg-muted/40"
                   >
-                    <div className="min-w-0">
-                      <p className="truncate text-xs font-medium">{opt.label}</p>
-                      {existing ? (
-                        <p className={EDITOR_UI.helper}>
-                          {existing.durationMs}ms
-                          {existing.loop ? " · loop" : ""}
+                    <div className="flex items-center justify-between gap-2">
+                      <div className="min-w-0">
+                        <p className="truncate text-xs font-medium">
+                          {opt.label}
                         </p>
-                      ) : null}
-                    </div>
-                    <Switch
-                      checked={checked}
-                      onCheckedChange={(enabled) => {
-                        const strokeTypes = [
-                          "draw_on",
-                          "border_build",
-                          "outline_sweep",
-                          "trace",
-                          "edge_sweep",
-                        ];
-                        if (enabled) {
-                          const next = createShapeBehavior(type);
-                          patch({
-                            behaviors: [
-                              ...config.behaviors.filter((b) => b.type !== type),
+                        {existing ? (
+                          <p className={EDITOR_UI.helper}>
+                            {existing.durationMs}ms
+                            {existing.loop ? " · loop" : ""}
+                            {isRevealExit && existing.exitDirection
+                              ? ` · ${existing.exitDirection}`
+                              : ""}
+                            {isTravel && existing.travelDirection
+                              ? ` · ${existing.travelCount ?? 5} · ${existing.travelDirection}`
+                              : ""}
+                          </p>
+                        ) : null}
+                      </div>
+                      <Switch
+                        checked={checked}
+                        onCheckedChange={(enabled) => {
+                          const strokeTypes = [
+                            "draw_on",
+                            "border_build",
+                            "outline_sweep",
+                            "trace",
+                            "edge_sweep",
+                          ];
+                          if (enabled) {
+                            const next = isRevealExit
+                              ? defaultRevealExitBehavior({
+                                  durationMs: reveal.exitDurationMs,
+                                  exitStyle: normalizeRevealExit(
+                                    reveal.exitStyle,
+                                    reveal.exitDirection,
+                                  ).style,
+                                  exitDirection: normalizeRevealExit(
+                                    reveal.exitStyle,
+                                    reveal.exitDirection,
+                                  ).direction,
+                                })
+                              : createShapeBehavior(type);
+                            const behaviors = withExclusiveEntranceBehavior(
+                              config.behaviors,
                               next,
-                            ],
-                            ...(strokeTypes.includes(type)
-                              ? {
-                                  strokeStyle:
-                                    config.strokeStyle === "none"
-                                      ? ("solid" as const)
-                                      : config.strokeStyle,
-                                  strokeWidth: Math.max(
-                                    3,
-                                    config.strokeWidth || 0,
-                                  ),
-                                  strokeColor:
-                                    config.strokeColor || "#5B8DEF",
-                                }
-                              : {}),
-                          });
-                        } else if (existing) {
-                          patch({
-                            behaviors: config.behaviors.map((b) =>
-                              b.type === type ? { ...b, enabled: false } : b,
-                            ),
-                          });
-                        }
-                      }}
-                    />
+                            );
+                            patch({
+                              behaviors,
+                              ...(isRevealExit
+                                ? {
+                                    reveal: createDefaultReveal({
+                                      ...reveal,
+                                      enabled: true,
+                                      exitDurationMs: next.durationMs,
+                                      exitStyle: next.exitStyle,
+                                      exitDirection: next.exitDirection,
+                                    }),
+                                  }
+                                : {}),
+                              ...(strokeTypes.includes(type)
+                                ? {
+                                    strokeStyle:
+                                      config.strokeStyle === "none"
+                                        ? ("solid" as const)
+                                        : config.strokeStyle,
+                                    strokeWidth: Math.max(
+                                      3,
+                                      config.strokeWidth || 0,
+                                    ),
+                                    strokeColor:
+                                      config.strokeColor || "#5B8DEF",
+                                  }
+                                : {}),
+                            });
+                            queueMicrotask(requestPreview);
+                          } else if (existing) {
+                            patch({
+                              behaviors: config.behaviors.map((b) =>
+                                b.type === type ? { ...b, enabled: false } : b,
+                              ),
+                            });
+                          }
+                        }}
+                      />
+                    </div>
+                    {isRevealExit && checked && existing ? (
+                      <div className="grid grid-cols-2 gap-2 pb-1 pl-0.5">
+                        <Select
+                          value={
+                            normalizeRevealExit(
+                              existing.exitStyle ?? reveal.exitStyle,
+                              existing.exitDirection ?? reveal.exitDirection,
+                            ).style
+                          }
+                          onValueChange={(exitStyle) => {
+                            const style = (exitStyle ??
+                              "fade") as ShapeRevealExitStyle;
+                            const direction =
+                              style === "wipe" || style === "slide"
+                                ? (existing.exitDirection ??
+                                    reveal.exitDirection) === "center"
+                                  ? style === "wipe"
+                                    ? "up"
+                                    : "left"
+                                  : (existing.exitDirection ??
+                                    reveal.exitDirection)
+                                : (existing.exitDirection ??
+                                  reveal.exitDirection);
+                            const nextReveal = createDefaultReveal({
+                              ...reveal,
+                              enabled: true,
+                              exitStyle: style,
+                              exitDirection: direction,
+                              exitDurationMs: existing.durationMs,
+                            });
+                            patch({
+                              reveal: nextReveal,
+                              behaviors: syncRevealExitBehavior(
+                                config.behaviors,
+                                nextReveal,
+                              ),
+                            });
+                            queueMicrotask(requestShapePreview);
+                          }}
+                        >
+                          <SelectTrigger className={EDITOR_UI.input}>
+                            <SelectValue placeholder="Style" />
+                          </SelectTrigger>
+                          <SelectContent>
+                            {SHAPE_REVEAL_EXIT_STYLE_OPTIONS.map((o) => (
+                              <SelectItem key={o.value} value={o.value}>
+                                {o.label}
+                              </SelectItem>
+                            ))}
+                          </SelectContent>
+                        </Select>
+                        <Select
+                          value={
+                            normalizeRevealExit(
+                              existing.exitStyle ?? reveal.exitStyle,
+                              existing.exitDirection ?? reveal.exitDirection,
+                            ).direction
+                          }
+                          onValueChange={(exitDirection) => {
+                            const nextReveal = createDefaultReveal({
+                              ...reveal,
+                              enabled: true,
+                              exitDirection: (exitDirection ??
+                                "center") as ShapeRevealExitDirection,
+                              exitStyle: existing.exitStyle ?? reveal.exitStyle,
+                              exitDurationMs: existing.durationMs,
+                            });
+                            patch({
+                              reveal: nextReveal,
+                              behaviors: syncRevealExitBehavior(
+                                config.behaviors,
+                                nextReveal,
+                              ),
+                            });
+                            queueMicrotask(requestShapePreview);
+                          }}
+                        >
+                          <SelectTrigger className={EDITOR_UI.input}>
+                            <SelectValue placeholder="Direction" />
+                          </SelectTrigger>
+                          <SelectContent>
+                            {SHAPE_REVEAL_EXIT_DIRECTION_OPTIONS.map((o) => (
+                              <SelectItem key={o.value} value={o.value}>
+                                {o.label}
+                              </SelectItem>
+                            ))}
+                          </SelectContent>
+                        </Select>
+                      </div>
+                    ) : null}
+                    {isTravel && checked && existing ? (
+                      <div className="space-y-1.5 pb-1 pl-0.5">
+                        <Select
+                          value={existing.travelDirection ?? "right"}
+                          onValueChange={(travelDirection) => {
+                            patch({
+                              behaviors: config.behaviors.map((b) =>
+                                b.type === type
+                                  ? {
+                                      ...b,
+                                      travelDirection: (travelDirection ??
+                                        "right") as ShapeTravelDirection,
+                                    }
+                                  : b,
+                              ),
+                            });
+                            queueMicrotask(requestPreview);
+                          }}
+                        >
+                          <SelectTrigger className={EDITOR_UI.input}>
+                            <SelectValue placeholder="Direction" />
+                          </SelectTrigger>
+                          <SelectContent>
+                            {SHAPE_TRAVEL_DIRECTION_OPTIONS.map((o) => (
+                              <SelectItem key={o.value} value={o.value}>
+                                {o.label}
+                              </SelectItem>
+                            ))}
+                          </SelectContent>
+                        </Select>
+                        <div className="grid grid-cols-3 gap-2">
+                          <NumberField
+                            label="Count"
+                            value={existing.travelCount ?? 5}
+                            min={2}
+                            max={16}
+                            onChange={(travelCount) => {
+                              patch({
+                                behaviors: config.behaviors.map((b) =>
+                                  b.type === type
+                                    ? { ...b, travelCount }
+                                    : b,
+                                ),
+                              });
+                              queueMicrotask(requestPreview);
+                            }}
+                          />
+                          <NumberField
+                            label="Size %"
+                            value={Math.round(
+                              (existing.travelSize ?? 0.28) * 100,
+                            )}
+                            min={12}
+                            max={70}
+                            onChange={(pct) => {
+                              patch({
+                                behaviors: config.behaviors.map((b) =>
+                                  b.type === type
+                                    ? { ...b, travelSize: pct / 100 }
+                                    : b,
+                                ),
+                              });
+                              queueMicrotask(requestPreview);
+                            }}
+                          />
+                          <NumberField
+                            label="Spread %"
+                            value={Math.round(
+                              (existing.travelSpread ?? 0.45) * 100,
+                            )}
+                            min={0}
+                            max={100}
+                            onChange={(pct) => {
+                              patch({
+                                behaviors: config.behaviors.map((b) =>
+                                  b.type === type
+                                    ? { ...b, travelSpread: pct / 100 }
+                                    : b,
+                                ),
+                              });
+                              queueMicrotask(requestPreview);
+                            }}
+                          />
+                        </div>
+                      </div>
+                    ) : null}
                   </div>
                 );
               })}

@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 
 import {
   buildShapePathD,
@@ -11,6 +11,7 @@ import {
   resolvePlacement,
   resolveRadii,
   resolveRevealConfig,
+  resolveRevealExit,
   sampleShapeBehaviors,
   sampleShapeReveal,
   shapeRevealTotalMs,
@@ -64,23 +65,27 @@ export function ShapeRenderer({
   const startRef = useRef<number | null>(null);
 
   const reveal = resolveRevealConfig(config);
+  const revealExit = resolveRevealExit(config, reveal);
   const revealTotal = shapeRevealTotalMs(config);
-  const behaviorKey = useMemo(
-    () =>
-      [
-        (config.behaviors ?? [])
-          .map(
-            (b) =>
-              `${b.type}:${b.enabled ? 1 : 0}:${b.durationMs}:${b.delayMs}:${b.speed}:${b.loop ? 1 : 0}`,
-          )
-          .join("|"),
-        `reveal:${reveal.enabled ? 1 : 0}:${reveal.entranceDurationMs}:${reveal.holdMs}:${reveal.exitDurationMs}:${reveal.exitStyle}`,
-      ].join("::"),
-    [config.behaviors, reveal],
-  );
+  // String key — getShapeConfig() returns new refs every render; never put those
+  // object/array identities in effect deps or we re-enter setState forever.
+  const behaviorKey = [
+    (config.behaviors ?? [])
+      .map(
+        (b) =>
+          `${b.type}:${b.enabled ? 1 : 0}:${b.durationMs}:${b.delayMs}:${b.speed}:${b.loop ? 1 : 0}:${b.exitStyle ?? ""}:${b.exitDirection ?? ""}:${b.travelDirection ?? ""}:${b.travelCount ?? ""}:${b.travelSize ?? ""}:${b.travelSpread ?? ""}`,
+      )
+      .join("|"),
+    `reveal:${reveal.enabled ? 1 : 0}:${reveal.entranceDurationMs}:${reveal.holdMs}:${reveal.exitDurationMs}:${revealExit.style}:${revealExit.direction}`,
+  ].join("::");
   const hasAnyBehavior = (config.behaviors ?? []).some((b) => b.enabled);
   const hasLoopingBehavior = (config.behaviors ?? []).some(
     (b) => b.enabled && b.loop,
+  );
+  const hasTravelBehavior = (config.behaviors ?? []).some(
+    (b) =>
+      b.enabled &&
+      (b.type === "travel_across" || b.type === "shape_cascade"),
   );
   const needsPreviewClock =
     config.enabled &&
@@ -102,25 +107,18 @@ export function ShapeRenderer({
   }, [object.id]);
 
   useEffect(() => {
-    if (!needsPreviewClock) {
+    if (!needsPreviewClock || isPlaying) {
       startRef.current = null;
-      setPreviewActive(false);
-      if (!config.enabled) setRafMs(0);
-      return;
-    }
-    if (isPlaying) {
-      startRef.current = null;
-      setPreviewActive(false);
+      setPreviewActive((active) => (active ? false : active));
       return;
     }
 
-    // Edit resting: sit at end of reveal so content stays visible.
-    if (reveal.enabled && !previewActive) {
-      startRef.current = null;
-      setRafMs(Math.max(revealTotal, 1));
-      return;
-    }
-    if (!reveal.enabled && !previewActive && !hasLoopingBehavior) {
+    // Idle / edit resting: derive clock during render — do not setState here.
+    // Only run local RAF while Preview is active, or for looping behaviors
+    // when Reveal is off.
+    const keepLooping =
+      !reveal.enabled && (hasLoopingBehavior || hasTravelBehavior);
+    if (!previewActive && !keepLooping) {
       startRef.current = null;
       return;
     }
@@ -132,13 +130,24 @@ export function ShapeRenderer({
       if (stopped) return;
       if (startRef.current == null) startRef.current = now;
       const elapsed = now - startRef.current;
+      if (keepLooping) {
+        const windowMs = Math.max(revealTotal, 12_000);
+        setRafMs(elapsed % windowMs);
+        raf = requestAnimationFrame(tick);
+        return;
+      }
       setRafMs(elapsed);
       if (reveal.enabled && elapsed >= revealTotal) {
         setRafMs(revealTotal);
         setPreviewActive(false);
         return;
       }
-      if (!reveal.enabled && hasAnyBehavior && !hasLoopingBehavior) {
+      if (
+        !hasLoopingBehavior &&
+        !hasTravelBehavior &&
+        !reveal.enabled &&
+        hasAnyBehavior
+      ) {
         const maxOneShot = (config.behaviors ?? [])
           .filter((b) => b.enabled)
           .reduce(
@@ -162,9 +171,9 @@ export function ShapeRenderer({
   }, [
     behaviorKey,
     config.enabled,
-    config.behaviors,
     hasAnyBehavior,
     hasLoopingBehavior,
+    hasTravelBehavior,
     isPlaying,
     needsPreviewClock,
     object.id,
@@ -182,31 +191,70 @@ export function ShapeRenderer({
   const anchorPoint = resolveAnchorPoint(config);
   const width = Math.max(1, layerWidth * placement.width);
   const height = Math.max(1, layerHeight * placement.height);
-  const timeMs = useExternalClock || isPlaying ? clockMs : rafMs;
-  const revealSample = sampleShapeReveal(config, timeMs, { overlay });
-  // With reveal off, behaviors always show. With reveal on, show while shape is up.
-  if (reveal.enabled && !revealSample.shapeVisible) return null;
-  if (!reveal.enabled && !config.enabled) return null;
-
-  // Always sample against live clock so entrance + looping behaviors animate.
+  // Rest at end of reveal when idle so content stays visible while editing.
+  const restMs =
+    reveal.enabled && !previewActive && !isPlaying && !useExternalClock
+      ? Math.max(revealTotal, 1)
+      : rafMs;
+  const timeMs = useExternalClock || isPlaying ? clockMs : restMs;
+  const revealSample = sampleShapeReveal(config, timeMs, {
+    overlay,
+    width,
+    height,
+  });
   const motion = sampleShapeBehaviors(config, timeMs, { width, height });
+  const persistFrame =
+    !reveal.enabled &&
+    (config.kind === "video_frame" ||
+      config.fillMode === "none" ||
+      config.fill === "transparent");
+  // Travel convoys stay visible even when reveal resting phase hid the host.
+  // Stroke-only frames also persist when Reveal is off.
+  if (
+    reveal.enabled &&
+    !revealSample.shapeVisible &&
+    !persistFrame &&
+    !(motion.travelInstances && motion.travelInstances.length > 0)
+  ) {
+    return null;
+  }
+
   const radii = resolveRadii(config, width, height);
   const inset = Math.max(0, config.borderPadding);
   const gradId = `shape-grad-${object.id.replace(/[^a-zA-Z0-9_-]/g, "")}`;
   const glowId = `shape-glow-${object.id.replace(/[^a-zA-Z0-9_-]/g, "")}`;
   const sweepId = `shape-sweep-${object.id.replace(/[^a-zA-Z0-9_-]/g, "")}`;
 
-  const fillMode = config.fillMode;
+  // During reveal cover (entrance/hold/exit), never draw stroke-only — force a solid fill.
+  const revealCover =
+    overlay &&
+    reveal.enabled &&
+    revealSample.phase !== "revealed";
+  const fillMode = revealCover ? "solid" : config.fillMode;
+  const coverFillFallback = "#1D4ED8";
   const rawFill =
-    fillMode === "none" || config.fill === "transparent"
-      ? "none"
-      : fillMode === "gradient"
+    revealCover
+      ? config.fillMode === "gradient"
         ? `url(#${gradId})`
-        : config.fill;
+        : config.fill &&
+            config.fill !== "transparent" &&
+            config.fillMode !== "none"
+          ? config.fill
+          : coverFillFallback
+      : fillMode === "none" || config.fill === "transparent"
+        ? "none"
+        : fillMode === "gradient"
+          ? `url(#${gradId})`
+          : config.fill;
+  const fillElementOpacity =
+    revealSample.phase === "exit" || revealSample.phase === "revealed"
+      ? 1
+      : Math.max(0.85, motion.fillOpacity ?? 1);
   const isLine =
     config.kind === "line" ||
     config.kind === "divider_line" ||
-    (rawFill === "none" &&
+    (!revealCover &&
+      rawFill === "none" &&
       ![
         "arrow",
         "star",
@@ -215,6 +263,14 @@ export function ShapeRenderer({
         "ribbon",
         "speech_bubble",
         "corner_accent",
+        "video_frame",
+        "border_frame",
+        "rounded_rectangle",
+        "rectangle",
+        "ellipse",
+        "circle",
+        "image_mask",
+        "video_mask",
       ].includes(config.kind));
 
   const dash =
@@ -253,11 +309,36 @@ export function ShapeRenderer({
       ? -40 + motion.lightSweepProgress * 180
       : -40;
 
-  const scaleX = motion.scaleX * revealSample.shapeScaleX;
-  const scaleY = motion.scaleY * revealSample.shapeScaleY;
-  const opacity = config.opacity * motion.opacity * revealSample.shapeOpacity;
-  const clipPath = revealSample.shapeClipPath ?? motion.clipPath;
-  const transformOrigin = cssTransformOriginFromAnchor(anchorPoint);
+  const scaleX =
+    (revealSample.phase === "exit" ||
+    revealSample.phase === "revealed" ||
+    motion.hideHostShape
+      ? 1
+      : motion.scaleX) * revealSample.shapeScaleX;
+  const scaleY =
+    (revealSample.phase === "exit" ||
+    revealSample.phase === "revealed" ||
+    motion.hideHostShape
+      ? 1
+      : motion.scaleY) * revealSample.shapeScaleY;
+  const opacity =
+    config.opacity *
+    (revealSample.phase === "exit" ||
+    revealSample.phase === "revealed" ||
+    motion.hideHostShape
+      ? 1
+      : motion.opacity) *
+    revealSample.shapeOpacity;
+  // Exit clip must win; don't let finished entrance clips mask wipe/slide.
+  const clipPath =
+    revealSample.shapeClipPath ??
+    (revealSample.phase === "exit" || revealSample.phase === "revealed"
+      ? undefined
+      : motion.clipPath);
+  const transformOrigin =
+    revealSample.phase === "exit" || revealSample.phase === "entrance"
+      ? revealSample.transformOrigin
+      : cssTransformOriginFromAnchor(anchorPoint);
 
   return (
     <div
@@ -266,6 +347,11 @@ export function ShapeRenderer({
       data-shape-kind={config.kind}
       data-shape-overlay={overlay ? "true" : "false"}
       data-shape-reveal={revealSample.phase}
+      data-shape-exit={
+        reveal.enabled
+          ? `${revealExit.style}:${revealExit.direction}`
+          : undefined
+      }
       data-shape-behaviors={motion.activeTypes.join(",") || undefined}
       style={{
         position: overlay ? "absolute" : "relative",
@@ -284,11 +370,30 @@ export function ShapeRenderer({
           top: `${placement.y * 100}%`,
           width: `${placement.width * 100}%`,
           height: `${placement.height * 100}%`,
+          // Clip on its own layer — clip-path + transform on one node
+          // collapses wipe/slide into a plain fade in some browsers.
+          clipPath,
+          WebkitClipPath: clipPath,
+          overflow: clipPath ? "hidden" : "visible",
+        }}
+      >
+      <div
+        data-shape-motion="true"
+        style={{
+          width: "100%",
+          height: "100%",
           opacity,
           boxShadow,
-          clipPath,
           transformOrigin,
-          transform: `translate3d(${motion.translateX + revealSample.shapeTranslateX}px, ${motion.translateY + revealSample.shapeTranslateY}px, 0) scale(${scaleX}, ${scaleY})`,
+          transform: `translate3d(${
+            (revealSample.phase === "exit" || revealSample.phase === "revealed"
+              ? 0
+              : motion.translateX) + revealSample.shapeTranslateX
+          }px, ${
+            (revealSample.phase === "exit" || revealSample.phase === "revealed"
+              ? 0
+              : motion.translateY) + revealSample.shapeTranslateY
+          }px, 0) scale(${scaleX}, ${scaleY})`,
           backdropFilter: config.glass.enabled
             ? `blur(${config.glass.blur}px)`
             : undefined,
@@ -301,8 +406,7 @@ export function ShapeRenderer({
               : !overlay && fillMode === "gradient" && useNativeRect
                 ? gradientCss(config)
                 : undefined,
-          willChange: "transform, opacity, clip-path",
-          overflow: "visible",
+          willChange: "transform, opacity",
         }}
       >
       <svg
@@ -371,7 +475,7 @@ export function ShapeRenderer({
           ) : null}
         </defs>
 
-        {useNativeRect ? (
+        {motion.hideHostShape ? null : useNativeRect ? (
           <rect
             x={inset + strokeWidth / 2}
             y={inset + strokeWidth / 2}
@@ -380,6 +484,7 @@ export function ShapeRenderer({
             rx={radii.topLeft}
             ry={radii.topLeft}
             fill={isLine ? "none" : rawFill}
+            fillOpacity={isLine ? undefined : fillElementOpacity}
             stroke={stroke}
             strokeWidth={strokeWidth}
             strokeDasharray={dash}
@@ -393,6 +498,9 @@ export function ShapeRenderer({
           <path
             d={d}
             fill={isLine && config.kind !== "arrow" ? "none" : rawFill}
+            fillOpacity={
+              isLine && config.kind !== "arrow" ? undefined : fillElementOpacity
+            }
             stroke={stroke}
             strokeWidth={strokeWidth}
             strokeDasharray={dash}
@@ -404,7 +512,50 @@ export function ShapeRenderer({
           />
         )}
 
-        {motion.lightSweepProgress != null ? (
+        {(motion.travelInstances ?? []).map((inst) => {
+          const cx = inst.x + inst.width / 2;
+          const cy = inst.y + inst.height / 2;
+          const cloneRadii = resolveRadii(config, inst.width, inst.height);
+          const cloneD = useNativeRect
+            ? ""
+            : buildShapePathD(config, inst.width, inst.height);
+          return (
+            <g
+              key={inst.id}
+              opacity={inst.opacity}
+              transform={`translate(${cx} ${cy}) rotate(${inst.rotation}) scale(${inst.scale}) translate(${-inst.width / 2} ${-inst.height / 2})`}
+            >
+              {useNativeRect ? (
+                <rect
+                  x={strokeWidth / 2}
+                  y={strokeWidth / 2}
+                  width={Math.max(1, inst.width - strokeWidth)}
+                  height={Math.max(1, inst.height - strokeWidth)}
+                  rx={cloneRadii.topLeft}
+                  ry={cloneRadii.topLeft}
+                  fill={isLine ? "none" : rawFill}
+                  stroke={stroke}
+                  strokeWidth={Math.max(1, strokeWidth * 0.85)}
+                  strokeLinecap="round"
+                  strokeLinejoin="round"
+                  filter={config.glow.enabled ? `url(#${glowId})` : undefined}
+                />
+              ) : (
+                <path
+                  d={cloneD}
+                  fill={isLine && config.kind !== "arrow" ? "none" : rawFill}
+                  stroke={stroke}
+                  strokeWidth={Math.max(1, strokeWidth * 0.85)}
+                  strokeLinecap="round"
+                  strokeLinejoin="round"
+                  filter={config.glow.enabled ? `url(#${glowId})` : undefined}
+                />
+              )}
+            </g>
+          );
+        })}
+
+        {motion.lightSweepProgress != null && !motion.hideHostShape ? (
           useNativeRect ? (
             <rect
               x={inset}
@@ -466,6 +617,7 @@ export function ShapeRenderer({
           ))}
         </div>
       ) : null}
+      </div>
       </div>
     </div>
   );

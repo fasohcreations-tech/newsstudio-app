@@ -6,13 +6,16 @@ import type { ScriptSaveInput } from "@/features/story-workspace/lib/script-util
 
 type Client = SupabaseClient<Database>;
 
+const STORY_SCRIPT_SELECT =
+  "id, organization_id, story_id, content_html, content_plain, word_count, character_count, version, is_current, created_by, updated_by, created_at, updated_at, deleted_at";
+
 export async function getCurrentStoryScript(
   client: Client,
   storyId: string,
 ): Promise<{ script: StoryScript | null; error: string | null }> {
   const { data, error } = await client
     .from("story_scripts")
-    .select("*")
+    .select(STORY_SCRIPT_SELECT)
     .eq("story_id", storyId)
     .eq("is_current", true)
     .is("deleted_at", null)
@@ -48,7 +51,7 @@ export async function ensureCurrentStoryScript(
       version: 1,
       is_current: true,
     })
-    .select("*")
+    .select(STORY_SCRIPT_SELECT)
     .single();
 
   if (error) {
@@ -85,7 +88,7 @@ export async function saveCurrentStoryScript(
     .eq("id", current.script.id)
     .eq("is_current", true)
     .is("deleted_at", null)
-    .select("*")
+    .select(STORY_SCRIPT_SELECT)
     .single();
 
   if (error) return { script: null, error: error.message };

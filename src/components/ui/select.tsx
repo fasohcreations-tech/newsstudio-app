@@ -6,7 +6,56 @@ import { Select as SelectPrimitive } from "@base-ui/react/select"
 import { cn } from "@/lib/utils"
 import { ChevronDownIcon, CheckIcon, ChevronUpIcon } from "lucide-react"
 
-const Select = SelectPrimitive.Root
+/**
+ * Base UI re-emits onValueChange while syncing controlled values on mount
+ * (Object inspector after clicking a layer). Ignore mount-sync and same-value
+ * emissions so patch → re-render → sync cannot recurse into max update depth.
+ */
+function Select(props: SelectPrimitive.Root.Props) {
+  const [ready, setReady] = React.useState(false)
+  React.useEffect(() => {
+    setReady(true)
+  }, [])
+
+  if ("value" in props) {
+    const { value, onValueChange, ...rest } = props
+    if (value == null) {
+      return (
+        <SelectPrimitive.Root
+          {...rest}
+          onValueChange={(next, eventDetails) => {
+            if (!ready) return
+            if (next == null || next === "") return
+            onValueChange?.(next, eventDetails)
+          }}
+        />
+      )
+    }
+    return (
+      <SelectPrimitive.Root
+        {...rest}
+        value={value}
+        onValueChange={(next, eventDetails) => {
+          if (!ready) return
+          if (next == null || next === "") return
+          if (next === value) return
+          onValueChange?.(next, eventDetails)
+        }}
+      />
+    )
+  }
+
+  return (
+    <SelectPrimitive.Root
+      {...props}
+      onValueChange={(next, eventDetails) => {
+        if (!ready) return
+        if (next == null || next === "") return
+        props.onValueChange?.(next, eventDetails)
+      }}
+    />
+  )
+}
 
 function SelectGroup({ className, ...props }: SelectPrimitive.Group.Props) {
   return (

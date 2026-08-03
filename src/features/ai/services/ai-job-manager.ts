@@ -2,6 +2,7 @@ import type { SupabaseClient } from "@supabase/supabase-js";
 
 import type { Database, Json } from "@/shared/types/database.types";
 import type { AiJob } from "@/features/content/types/content.types";
+import { AI_JOB_SELECT } from "@/features/content/services/ai-job.service";
 import type { AIUsageStats } from "@/features/ai/types/ai";
 import type { AiJobStatus } from "@/shared/types/database.types";
 
@@ -40,7 +41,7 @@ export async function enqueueJob(
       created_by: input.userId,
       updated_by: input.userId,
     })
-    .select("*")
+    .select(AI_JOB_SELECT)
     .single();
 
   if (error) return { job: null, error: error.message };
@@ -116,7 +117,7 @@ export async function getJob(
 ): Promise<{ job: AiJob | null; error: string | null }> {
   const { data, error } = await client
     .from("ai_jobs")
-    .select("*")
+    .select(AI_JOB_SELECT)
     .eq("id", jobId)
     .maybeSingle();
 
@@ -132,7 +133,7 @@ export async function listRecentJobs(
 ): Promise<{ jobs: AiJob[]; error: string | null }> {
   const { data, error } = await client
     .from("ai_jobs")
-    .select("*")
+    .select(AI_JOB_SELECT)
     .eq("organization_id", organizationId)
     .order("created_at", { ascending: false })
     .limit(limit);
@@ -182,7 +183,7 @@ async function patchJob(
     .from("ai_jobs")
     .update(patch)
     .eq("id", jobId)
-    .select("*")
+    .select(AI_JOB_SELECT)
     .single();
 
   if (error) return { job: null, error: error.message };

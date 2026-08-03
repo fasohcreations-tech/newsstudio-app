@@ -7,18 +7,7 @@ import type {
 
 export const GNN_BROADCAST_PACKAGE_ID = "gnn-broadcast-v1";
 
-export const GNN_MASTER_SCENE_CODES = [
-  "GNN-001",
-  "GNN-002",
-  "GNN-003",
-  "GNN-004",
-  "GNN-005",
-  "GNN-006",
-  "GNN-007",
-  "GNN-008",
-  "GNN-009",
-  "GNN-010",
-] as const;
+export const GNN_MASTER_SCENE_CODES = ["GNN-001"] as const;
 
 export type GnnMasterSceneCode = (typeof GNN_MASTER_SCENE_CODES)[number];
 

@@ -25,12 +25,22 @@ export function MalayalamFontSelect({
 }: MalayalamFontSelectProps) {
   const selected =
     STORY_MALAYALAM_FONT_OPTIONS.find((option) => option.value === value) ??
-    STORY_MALAYALAM_FONT_OPTIONS.find((option) => option.family === value);
+    // Prefer bold when resolving a bare CSS family string.
+    [...STORY_MALAYALAM_FONT_OPTIONS]
+      .reverse()
+      .find((option) => option.family === value);
+
+  const token = selected?.value ?? DEFAULT_MALAYALAM_FONT_VALUE;
 
   return (
     <Select
-      value={selected?.value ?? DEFAULT_MALAYALAM_FONT_VALUE}
-      onValueChange={(next) => onChange(next ?? DEFAULT_MALAYALAM_FONT_VALUE)}
+      value={token}
+      onValueChange={(next) => {
+        const resolved = next ?? DEFAULT_MALAYALAM_FONT_VALUE;
+        // Ignore sync re-emits and family↔token equivalents.
+        if (resolved === value || resolved === token) return;
+        onChange(resolved);
+      }}
     >
       <SelectTrigger className={className}>
         <SelectValue placeholder="Select Malayalam font" />

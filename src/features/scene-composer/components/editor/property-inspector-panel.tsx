@@ -146,7 +146,10 @@ export function PropertyInspectorPanel({
   >(selectedObject ? "object" : "story");
 
   useEffect(() => {
-    setTab(selectedObject ? "object" : "story");
+    setTab((current) => {
+      const next = selectedObject ? "object" : "story";
+      return current === next ? current : next;
+    });
   }, [selectedObject?.id]);
 
   if (kind === "video" && selectedObject) {
@@ -162,7 +165,7 @@ export function PropertyInspectorPanel({
               value === "behaviors" ||
               value === "shape"
             ) {
-              setTab(value);
+              setTab((current) => (current === value ? current : value));
             }
           }}
           className="flex min-h-0 flex-1 flex-col"
@@ -196,45 +199,53 @@ export function PropertyInspectorPanel({
             />
           </TabsContent>
           <TabsContent value="animation" className="min-h-0 flex-1">
-            <ScrollArea className="h-full">
-              <div className="p-4">
-                <LayerMotionFields
+            {tab === "animation" ? (
+              <ScrollArea className="h-full">
+                <div className="p-4">
+                  <LayerMotionFields
+                    object={selectedObject}
+                    onObjectPatch={onObjectPatch}
+                    onPreview={onPreviewMotion}
+                  />
+                </div>
+              </ScrollArea>
+            ) : null}
+          </TabsContent>
+          <TabsContent value="effects" className="min-h-0 flex-1">
+            {tab === "effects" ? (
+              <ScrollArea className="h-full">
+                <LayerEffectsPanel
+                  object={selectedObject}
+                  onObjectPatch={onObjectPatch}
+                />
+              </ScrollArea>
+            ) : null}
+          </TabsContent>
+          <TabsContent value="behaviors" className="min-h-0 flex-1">
+            {tab === "behaviors" ? (
+              <ScrollArea className="h-full">
+                <LayerBehaviorsPanel
                   object={selectedObject}
                   onObjectPatch={onObjectPatch}
                   onPreview={onPreviewMotion}
                 />
-              </div>
-            </ScrollArea>
-          </TabsContent>
-          <TabsContent value="effects" className="min-h-0 flex-1">
-            <ScrollArea className="h-full">
-              <LayerEffectsPanel
-                object={selectedObject}
-                onObjectPatch={onObjectPatch}
-              />
-            </ScrollArea>
-          </TabsContent>
-          <TabsContent value="behaviors" className="min-h-0 flex-1">
-            <ScrollArea className="h-full">
-              <LayerBehaviorsPanel
-                object={selectedObject}
-                onObjectPatch={onObjectPatch}
-                onPreview={onPreviewMotion}
-              />
-            </ScrollArea>
+              </ScrollArea>
+            ) : null}
           </TabsContent>
           <TabsContent value="shape" className="min-h-0 flex-1">
-            <ScrollArea className="h-full">
-              <LayerShapePanel
-                object={selectedObject}
-                onObjectPatch={onObjectPatch}
-                onAddObject={onAddShapeObject}
-                onDeleteObject={onDeleteObject}
-                onDuplicateObject={onDuplicateObject}
-                onToggleAllLayers={onToggleShapeAllLayers}
-                allLayersEnabled={allLayersShapeEnabled}
-              />
-            </ScrollArea>
+            {tab === "shape" ? (
+              <ScrollArea className="h-full">
+                <LayerShapePanel
+                  object={selectedObject}
+                  onObjectPatch={onObjectPatch}
+                  onAddObject={onAddShapeObject}
+                  onDeleteObject={onDeleteObject}
+                  onDuplicateObject={onDuplicateObject}
+                  onToggleAllLayers={onToggleShapeAllLayers}
+                  allLayersEnabled={allLayersShapeEnabled}
+                />
+              </ScrollArea>
+            ) : null}
           </TabsContent>
         </Tabs>
       </div>
@@ -362,76 +373,86 @@ export function PropertyInspectorPanel({
         </TabsContent>
 
         <TabsContent value="animation" className="min-h-0 flex-1">
-          <ScrollArea className="h-full">
-            {selectedObject ? (
-              <div className="p-4">
-                <LayerMotionFields
+          {tab === "animation" ? (
+            <ScrollArea className="h-full">
+              {selectedObject ? (
+                <div className="p-4">
+                  <LayerMotionFields
+                    object={selectedObject}
+                    onObjectPatch={onObjectPatch}
+                    onPreview={onPreviewMotion}
+                  />
+                </div>
+              ) : (
+                <p className={`${EDITOR_UI.helper} p-4`}>
+                  Select a layer to edit animation.
+                </p>
+              )}
+            </ScrollArea>
+          ) : null}
+        </TabsContent>
+
+        <TabsContent value="effects" className="min-h-0 flex-1">
+          {tab === "effects" ? (
+            <ScrollArea className="h-full">
+              {selectedObject ? (
+                <LayerEffectsPanel
+                  object={selectedObject}
+                  onObjectPatch={onObjectPatch}
+                />
+              ) : (
+                <p className={`${EDITOR_UI.helper} p-4`}>
+                  Select a layer to edit broadcast effects.
+                </p>
+              )}
+            </ScrollArea>
+          ) : null}
+        </TabsContent>
+
+        <TabsContent value="behaviors" className="min-h-0 flex-1">
+          {tab === "behaviors" ? (
+            <ScrollArea className="h-full">
+              {selectedObject ? (
+                <LayerBehaviorsPanel
                   object={selectedObject}
                   onObjectPatch={onObjectPatch}
                   onPreview={onPreviewMotion}
                 />
-              </div>
-            ) : (
-              <p className={`${EDITOR_UI.helper} p-4`}>
-                Select a layer to edit animation.
-              </p>
-            )}
-          </ScrollArea>
-        </TabsContent>
-
-        <TabsContent value="effects" className="min-h-0 flex-1">
-          <ScrollArea className="h-full">
-            {selectedObject ? (
-              <LayerEffectsPanel
-                object={selectedObject}
-                onObjectPatch={onObjectPatch}
-              />
-            ) : (
-              <p className={`${EDITOR_UI.helper} p-4`}>
-                Select a layer to edit broadcast effects.
-              </p>
-            )}
-          </ScrollArea>
-        </TabsContent>
-
-        <TabsContent value="behaviors" className="min-h-0 flex-1">
-          <ScrollArea className="h-full">
-            {selectedObject ? (
-              <LayerBehaviorsPanel
-                object={selectedObject}
-                onObjectPatch={onObjectPatch}
-                onPreview={onPreviewMotion}
-              />
-            ) : (
-              <p className={`${EDITOR_UI.helper} p-4`}>
-                Select a layer to edit behaviors.
-              </p>
-            )}
-          </ScrollArea>
+              ) : (
+                <p className={`${EDITOR_UI.helper} p-4`}>
+                  Select a layer to edit behaviors.
+                </p>
+              )}
+            </ScrollArea>
+          ) : null}
         </TabsContent>
 
         <TabsContent value="shape" className="min-h-0 flex-1">
-          <ScrollArea className="h-full">
-            {selectedObject ? (
-              <LayerShapePanel
-                object={selectedObject}
-                onObjectPatch={onObjectPatch}
-                onAddObject={onAddShapeObject}
-                onDeleteObject={onDeleteObject}
-                onDuplicateObject={onDuplicateObject}
-                onToggleAllLayers={onToggleShapeAllLayers}
-                allLayersEnabled={allLayersShapeEnabled}
-              />
-            ) : (
-              <p className={`${EDITOR_UI.helper} p-4`}>
-                Select a layer to edit shapes.
-              </p>
-            )}
-          </ScrollArea>
+          {tab === "shape" ? (
+            <ScrollArea className="h-full">
+              {selectedObject ? (
+                <LayerShapePanel
+                  object={selectedObject}
+                  onObjectPatch={onObjectPatch}
+                  onAddObject={onAddShapeObject}
+                  onDeleteObject={onDeleteObject}
+                  onDuplicateObject={onDuplicateObject}
+                  onToggleAllLayers={onToggleShapeAllLayers}
+                  allLayersEnabled={allLayersShapeEnabled}
+                />
+              ) : (
+                <p className={`${EDITOR_UI.helper} p-4`}>
+                  Select a layer to edit shapes.
+                </p>
+              )}
+            </ScrollArea>
+          ) : null}
         </TabsContent>
 
         <TabsContent value="story" className="min-h-0 flex-1">
-          <StoryDataFormPanel data={data} onFieldChange={onFieldChange} />
+          {tab === "story" ? (
+            <StoryDataFormPanel data={data} onFieldChange={onFieldChange} />
+          ) : null}
         </TabsContent>
       </Tabs>
     </div>
@@ -591,11 +612,12 @@ function TextFields({
           <Field label="Font Weight">
             <Select
               value={fontWeight >= 700 ? "bold" : "regular"}
-              onValueChange={(value) =>
-                patchTextStyle({
-                  font_weight: value === "bold" ? 800 : 600,
-                })
-              }
+              onValueChange={(value) => {
+                const nextWeight = value === "bold" ? 800 : 600;
+                const alreadyBold = fontWeight >= 700;
+                if (value === "bold" ? alreadyBold : !alreadyBold) return;
+                patchTextStyle({ font_weight: nextWeight });
+              }}
             >
               <SelectTrigger className={EDITOR_UI.input}>
                 <SelectValue />

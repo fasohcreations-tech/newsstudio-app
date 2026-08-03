@@ -176,4 +176,39 @@ export const SHAPE_BEHAVIOR_OPTIONS: Array<{ value: string; label: string }> = [
   { value: "outline_sweep", label: "Outline Sweep" },
   { value: "edge_sweep", label: "Edge Sweep" },
   { value: "light_sweep", label: "Light Sweep" },
+  { value: "travel_across", label: "Travel Across" },
+  { value: "shape_cascade", label: "Shape Cascade" },
+  { value: "reveal_exit", label: "Reveal Exit" },
+];
+
+export const SHAPE_TRAVEL_DIRECTION_OPTIONS: Array<{
+  value: "left" | "right" | "up" | "down";
+  label: string;
+}> = [
+  { value: "right", label: "Left → Right" },
+  { value: "left", label: "Right → Left" },
+  { value: "down", label: "Top → Bottom" },
+  { value: "up", label: "Bottom → Top" },
+];
+
+export const SHAPE_REVEAL_EXIT_STYLE_OPTIONS: Array<{
+  value: "fade" | "scale_out" | "wipe" | "slide" | "reverse";
+  label: string;
+}> = [
+  { value: "fade", label: "Fade out" },
+  { value: "scale_out", label: "Scale out" },
+  { value: "wipe", label: "Wipe" },
+  { value: "slide", label: "Slide" },
+  { value: "reverse", label: "Reverse grow" },
+];
+
+export const SHAPE_REVEAL_EXIT_DIRECTION_OPTIONS: Array<{
+  value: "up" | "down" | "left" | "right" | "center";
+  label: string;
+}> = [
+  { value: "up", label: "Up" },
+  { value: "down", label: "Down" },
+  { value: "left", label: "Left" },
+  { value: "right", label: "Right" },
+  { value: "center", label: "Center" },
 ];

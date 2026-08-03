@@ -63,10 +63,22 @@ export function useComposerCanvas() {
 
   const selectObject = useCallback((id: string | null, additive = false) => {
     if (!id) {
-      setSelection({ selectedObjectIds: [], primaryObjectId: null });
+      setSelection((prev) =>
+        prev.primaryObjectId == null && prev.selectedObjectIds.length === 0
+          ? prev
+          : { selectedObjectIds: [], primaryObjectId: null },
+      );
       return;
     }
     setSelection((prev) => {
+      if (
+        !additive &&
+        prev.primaryObjectId === id &&
+        prev.selectedObjectIds.length === 1 &&
+        prev.selectedObjectIds[0] === id
+      ) {
+        return prev;
+      }
       if (!additive) {
         return { selectedObjectIds: [id], primaryObjectId: id };
       }
@@ -89,22 +101,32 @@ export function useComposerCanvas() {
   }, []);
 
   const setZoom = useCallback((zoom: number) => {
-    setViewport((prev) => ({
-      ...prev,
-      zoom: Math.max(0.25, Math.min(2, zoom)),
-    }));
+    const nextZoom = Math.max(0.25, Math.min(2, zoom));
+    setViewport((prev) =>
+      Math.abs(prev.zoom - nextZoom) < 0.001
+        ? prev
+        : { ...prev, zoom: nextZoom },
+    );
   }, []);
 
   const setFitZoom = useCallback((zoom: number) => {
-    setViewport((prev) => ({
-      ...prev,
-      zoom: Math.max(0.1, Math.min(3, zoom)),
-      panX: 0,
-      panY: 0,
-    }));
+    const nextZoom = Math.max(0.1, Math.min(3, zoom));
+    // Bail out when unchanged — ResizeObserver + always-new viewport objects
+    // otherwise re-enter setState until "Maximum update depth exceeded".
+    setViewport((prev) => {
+      if (
+        Math.abs(prev.zoom - nextZoom) < 0.001 &&
+        prev.panX === 0 &&
+        prev.panY === 0
+      ) {
+        return prev;
+      }
+      return { ...prev, zoom: nextZoom, panX: 0, panY: 0 };
+    });
   }, []);
 
   const panBy = useCallback((dx: number, dy: number) => {
+    if (dx === 0 && dy === 0) return;
     setViewport((prev) => ({
       ...prev,
       panX: prev.panX + dx,

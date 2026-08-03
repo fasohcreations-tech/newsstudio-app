@@ -13,6 +13,12 @@ import type {
 
 type Client = SupabaseClient;
 
+const CREATIVE_TEMPLATE_SELECT =
+  "id, organization_id, name, description, category, thumbnail_url, aspect_ratio, duration_ms, metadata, created_by, updated_by, created_at, updated_at, deleted_at";
+
+const CREATIVE_TEMPLATE_PLACEHOLDER_SELECT =
+  "id, organization_id, template_id, kind, label, sort_order, default_value, constraints, created_at, updated_at";
+
 function ok<T>(data: T): CreativeServiceResult<T> {
   return { data, error: null };
 }
@@ -55,7 +61,7 @@ export class SupabaseTemplateService implements TemplateService {
   ): Promise<CreativeServiceResult<CreativeTemplate[]>> {
     const { data, error } = await this.client
       .from("creative_studio_templates")
-      .select("*")
+      .select(CREATIVE_TEMPLATE_SELECT)
       .eq("organization_id", organizationId)
       .is("deleted_at", null)
       .order("name", { ascending: true });
@@ -69,7 +75,7 @@ export class SupabaseTemplateService implements TemplateService {
   ): Promise<CreativeServiceResult<CreativeTemplateWithPlaceholders>> {
     const { data: template, error } = await this.client
       .from("creative_studio_templates")
-      .select("*")
+      .select(CREATIVE_TEMPLATE_SELECT)
       .eq("id", templateId)
       .is("deleted_at", null)
       .maybeSingle();
@@ -79,7 +85,7 @@ export class SupabaseTemplateService implements TemplateService {
 
     const { data: placeholders, error: phError } = await this.client
       .from("creative_studio_template_placeholders")
-      .select("*")
+      .select(CREATIVE_TEMPLATE_PLACEHOLDER_SELECT)
       .eq("template_id", templateId)
       .order("sort_order", { ascending: true });
 
@@ -106,7 +112,7 @@ export class SupabaseTemplateService implements TemplateService {
         created_by: input.userId,
         updated_by: input.userId,
       })
-      .select("*")
+      .select(CREATIVE_TEMPLATE_SELECT)
       .single();
 
     if (error || !template) return fail(error?.message ?? "Create failed");

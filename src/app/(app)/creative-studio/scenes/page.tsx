@@ -46,8 +46,9 @@ export default async function MotionSceneLibraryPage({
   const service = createMotionSceneService(supabase);
   const orgId = membership.organization.id;
 
-  const [defaultsResult, scenesResult, categoriesResult] = await Promise.all([
-    ensureComposerDefaultsAction(),
+  // Ensure (and soft-delete retired templates) before listing so the library is current.
+  const defaultsResult = await ensureComposerDefaultsAction();
+  const [scenesResult, categoriesResult] = await Promise.all([
     service.listScenes(orgId),
     service.listCategories(orgId),
   ]);

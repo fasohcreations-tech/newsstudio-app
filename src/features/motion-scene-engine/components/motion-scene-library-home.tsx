@@ -1,7 +1,7 @@
 "use client";
 
 import Link from "next/link";
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { Layers, Plus, Search } from "lucide-react";
 import { toast } from "sonner";
 
@@ -25,6 +25,7 @@ import {
   countGnnScenes,
   isGnnScene,
 } from "@/features/scene-composer/lib/gnn-package-utils";
+import { SceneIntelligencePanel } from "@/features/ai/intelligence/components/scene-intelligence-panel";
 import type {
   MotionScene,
   MotionSceneType,
@@ -50,6 +51,21 @@ export function MotionSceneLibraryHome({
   const [search, setSearch] = useState("");
   const [categoryId, setCategoryId] = useState<string | "all">("all");
   const [gnnOnly, setGnnOnly] = useState(false);
+
+  const scenesFingerprint = useMemo(
+    () =>
+      initialScenes
+        .map((scene) => `${scene.id}:${scene.updated_at}:${scene.version}`)
+        .join("|"),
+    [initialScenes],
+  );
+
+  useEffect(() => {
+    setScenes(initialScenes);
+    // Fingerprint only — a fresh array reference from the server parent must not
+    // re-set state every render.
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- intentional
+  }, [scenesFingerprint]);
 
   const gnnSceneCount = useMemo(() => countGnnScenes(scenes), [scenes]);
 
@@ -133,6 +149,8 @@ export function MotionSceneLibraryHome({
           Back to Creative Studio
         </Button>
       </div>
+
+      <SceneIntelligencePanel storyType="news" language="en" />
 
       <GnnPackageStatus gnnSceneCount={gnnSceneCount} />
 
@@ -248,29 +266,37 @@ export function MotionSceneLibraryHome({
               </div>
               <p className="mt-1 text-[10px] text-muted-foreground">
                 {(scene.duration_ms / 1000).toFixed(1)}s ·{" "}
-                {scene.scene_document.layers.length} layers ·{" "}
-                {scene.aspect_format}
+                {typeof scene.metadata?.layer_count === "number"
+                  ? scene.metadata.layer_count
+                  : (scene.scene_document?.layers?.length ?? 0)}{" "}
+                layers · {scene.aspect_format}
               </p>
             </button>
             <div className="flex border-t border-border/40 px-2 py-1">
-              <Button
-                type="button"
-                size="sm"
-                variant="ghost"
-                className="h-7 text-xs"
-                onClick={() =>
-                  void duplicateMotionSceneAction(scene.id).then((result) => {
-                    if (!result.success) {
-                      toast.error(result.error ?? "Duplicate failed");
-                      return;
-                    }
-                    setScenes((prev) => [result.data, ...prev]);
-                    toast.success("Scene duplicated");
-                  })
-                }
-              >
-                Duplicate
-              </Button>
+              {isGnnScene(scene) ? (
+                <p className="px-2 py-1.5 text-[10px] text-muted-foreground">
+                  Master template — use History inside the editor for versions
+                </p>
+              ) : (
+                <Button
+                  type="button"
+                  size="sm"
+                  variant="ghost"
+                  className="h-7 text-xs"
+                  onClick={() =>
+                    void duplicateMotionSceneAction(scene.id).then((result) => {
+                      if (!result.success) {
+                        toast.error(result.error ?? "Duplicate failed");
+                        return;
+                      }
+                      setScenes((prev) => [result.data, ...prev]);
+                      toast.success("Scene duplicated");
+                    })
+                  }
+                >
+                  Duplicate
+                </Button>
+              )}
             </div>
           </Card>
         ))}

@@ -126,6 +126,7 @@ export function LayerBehaviorsPanel({
   }, []);
 
   const commit = (next: SceneObject) => {
+    if (next === object) return;
     onObjectPatch(object.id, { metadata: next.metadata });
   };
 
@@ -190,7 +191,9 @@ export function LayerBehaviorsPanel({
         </div>
 
         <Field label="Preset">
+          {/* Uncontrolled action menu — value={null}+reset caused max update depth. */}
           <Select
+            key={`edge-preset-${object.id}`}
             onValueChange={(value) => {
               if (!value) return;
               const builtin = EDGE_SWEEP_PRESETS.find((p) => p.id === value);

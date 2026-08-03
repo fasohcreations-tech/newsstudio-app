@@ -144,7 +144,36 @@ export type ShapeBehaviorType =
   | "trace"
   | "outline_sweep"
   | "edge_sweep"
-  | "light_sweep";
+  | "light_sweep"
+  /** Exit the intro shape to reveal the original layer (used with reveal). */
+  | "reveal_exit"
+  /** Multiple shape clones enter from one edge, cross, and exit the other. */
+  | "travel_across"
+  /** Staggered cascade of clones sweeping through the layer. */
+  | "shape_cascade";
+
+export type ShapeTravelDirection = "left" | "right" | "up" | "down";
+
+export type ShapeRevealExitDirection =
+  | "up"
+  | "down"
+  | "left"
+  | "right"
+  | "center";
+
+/**
+ * Exit motion family. Direction is separate (`exitDirection`) for wipe/slide.
+ * Legacy values wipe_up / wipe_down / slide_left are still accepted when loading.
+ */
+export type ShapeRevealExitStyle =
+  | "fade"
+  | "scale_out"
+  | "wipe"
+  | "slide"
+  | "reverse"
+  | "wipe_up"
+  | "wipe_down"
+  | "slide_left";
 
 export type ShapeBehaviorConfig = {
   type: ShapeBehaviorType;
@@ -153,23 +182,28 @@ export type ShapeBehaviorConfig = {
   delayMs: number;
   speed: number;
   loop: boolean;
+  /** reveal_exit only — motion family. */
+  exitStyle?: ShapeRevealExitStyle;
+  /** reveal_exit only — wipe/slide direction. */
+  exitDirection?: ShapeRevealExitDirection;
+  /** travel_across / shape_cascade — travel axis. */
+  travelDirection?: ShapeTravelDirection;
+  /** travel_across / shape_cascade — number of clones (2–16). */
+  travelCount?: number;
+  /** travel_across / shape_cascade — clone size vs layer (0.12–0.7). */
+  travelSize?: number;
+  /** travel_across / shape_cascade — lane spread / stagger (0–1). */
+  travelSpread?: number;
 };
 
 /** Shape appears first, then exits to reveal the original layer. */
-export type ShapeRevealExitStyle =
-  | "fade"
-  | "scale_out"
-  | "wipe_up"
-  | "wipe_down"
-  | "slide_left"
-  | "reverse";
-
 export type ShapeRevealConfig = {
   enabled: boolean;
   entranceDurationMs: number;
   holdMs: number;
   exitDurationMs: number;
   exitStyle: ShapeRevealExitStyle;
+  exitDirection: ShapeRevealExitDirection;
 };
 
 export type ShapeLibraryCategory =

@@ -27,6 +27,11 @@ type Gnn001MainVideoContainerPropsInput = {
   selected?: boolean;
   onSelect?: () => void;
   onBrowseMedia?: () => void;
+  /**
+   * When Shape Composer is active, drop the built-in metallic frame so the
+   * shape rim / mask owns the look (otherwise video chrome hides shape work).
+   */
+  suppressFrameChrome?: boolean;
 };
 
 function normalizeFit(fit: Gnn001VideoFit | string): Gnn001VideoFit {
@@ -101,6 +106,7 @@ export function Gnn001MainVideoContainer({
   selected = false,
   onSelect,
   onBrowseMedia,
+  suppressFrameChrome = false,
 }: Gnn001MainVideoContainerPropsInput) {
   const resolved = {
     ...resolveGnn001MainVideoProps(content, bindings),
@@ -184,12 +190,24 @@ export function Gnn001MainVideoContainer({
       }}
     >
       <VideoFrame
-        borderWidth={resolved.border_width}
-        borderColor={resolved.border_color}
-        cornerRadius={radius}
-        frameOpacity={resolved.frame_opacity}
-        glassOpacity={resolved.glass_opacity}
-        innerShadow={resolved.inner_shadow}
+        borderWidth={suppressFrameChrome ? 0 : resolved.border_width}
+        borderColor={
+          suppressFrameChrome ? "transparent" : resolved.border_color
+        }
+        cornerRadius={suppressFrameChrome ? 0 : radius}
+        frameOpacity={suppressFrameChrome ? 1 : resolved.frame_opacity}
+        glassOpacity={suppressFrameChrome ? 0 : resolved.glass_opacity}
+        innerShadow={suppressFrameChrome ? 0 : resolved.inner_shadow}
+        style={
+          suppressFrameChrome
+            ? {
+                background: "transparent",
+                border: "none",
+                boxShadow: "none",
+                overflow: "hidden",
+              }
+            : undefined
+        }
       >
         {/* Padded media viewport */}
         <div
@@ -255,7 +273,7 @@ export function Gnn001MainVideoContainer({
         </div>
 
         {/* Corner accents — state changes color only */}
-        {!isFullscreen ? (
+        {!isFullscreen && !suppressFrameChrome ? (
           <CornerAccentSet
             color={accent}
             thickness={resolved.accent_thickness}

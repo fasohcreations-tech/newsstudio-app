@@ -92,6 +92,9 @@ Stored on `metadata.shape.behaviors`. `ShapeRenderer` samples them every frame (
 - Stroke: draw_on, border_build, outline_sweep, trace, edge_sweep
 - Transform / clip: panel_grow, ribbon_expand, corner_build, morph, split, merge
 - Wash: light_sweep
+- Multi-clone: **travel_across** (convoy enters one edge → exits the other), **shape_cascade** (staggered wave)
+  - Controls: direction, count, size %, lane spread
+  - Host shape is hidden while clones run; loops by default
 
 Shape → General lists active behaviors (enable / remove) and **Preview behaviors** replays one-shots.
 
@@ -102,7 +105,8 @@ Shape → General lists active behaviors (enable / remove) and **Preview behavio
 - Original layer content and fill stay **hidden until phase `revealed`** (not during exit)
 - Shape Color / Border Color control the intro shape
 - Layer Color (`object.style.fill`) is what remains after exit
-- Exit styles: fade, scale_out, wipe_up, wipe_down, slide_left, reverse
+- Exit is a **Reveal Exit** behavior with separate style (fade / scale_out / wipe / slide / reverse) and direction (up / down / left / right / center)
+- Legacy exit styles (`wipe_up`, `wipe_down`, `slide_left`) still load and map to style + direction
 - Document load seeds Shape Composer onto every layer missing config
 - **All layers** switch enables or disables Shape Composer on every layer
 

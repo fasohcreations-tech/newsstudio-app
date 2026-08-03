@@ -27,6 +27,7 @@ import {
   EDGE_SWEEP_PRESETS,
   ensureEdgeSweepDemo,
 } from "@/features/scene-composer/lib/edge-sweep";
+import { ensureHeadlineLightSweepDemo } from "@/features/scene-composer/lib/broadcast-effects";
 import { ensureObjectMotionDefaults } from "@/features/scene-composer/lib/motion-animation/engine";
 import { storyTokensForRegion } from "@/features/story-production/lib/story-binding-engine";
 import type {
@@ -347,6 +348,9 @@ export function buildGnn001SkeletonObjects(durationMs = 12000): SceneObject[] {
     const object = createSkeletonObject(region, durationMs, baseOrder + index);
     if (region.key === "lower-info-panel") {
       return ensureEdgeSweepDemo(object, premiumWhite);
+    }
+    if (region.key === "headline") {
+      return ensureHeadlineLightSweepDemo(object);
     }
     return object;
   });

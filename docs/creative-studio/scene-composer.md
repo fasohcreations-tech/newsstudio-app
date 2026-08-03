@@ -138,7 +138,7 @@ Scene Composer now seeds a complete default package for Good News Flash:
 - Master design system (typography, colors, spacing, motion language)
 - Reusable component library
 - Motion preset library
-- 10 master scenes (`GNN-001` to `GNN-010`)
+- 1 master scene (`GNN-001 Full News Story`)
 - Responsive variants (16:9, 9:16, 1:1, 4K)
 
 See `docs/creative-studio/gnn-broadcast-package-v1.md`.

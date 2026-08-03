@@ -1,20 +1,41 @@
 "use client";
 
-import { Sparkles } from "lucide-react";
+import { TimelineIntelligencePanel } from "@/features/ai/intelligence/components/timeline-intelligence-panel";
+import type {
+  CreativeTimeline,
+  CreativeTimelineClip,
+  CreativeTimelineTrack,
+} from "@/features/creative-studio/types/creative-studio.types";
 
-import { ModulePlaceholder } from "@/shared/components/layout/module-placeholder";
+type AiAssistantPanelProps = {
+  projectId?: string | null;
+  timelineId?: string | null;
+  storyTitle?: string;
+  onTimelineApplied?: (input: {
+    clips: CreativeTimelineClip[];
+    trackId: string;
+    track: CreativeTimelineTrack;
+    timeline: CreativeTimeline;
+    projectId: string | null;
+  }) => void;
+};
 
-export function AiAssistantPanel() {
+/**
+ * Creative Studio AI dock — Module 6.0 Timeline Intelligence.
+ * Accept applies editable draft beats to the project timeline.
+ */
+export function AiAssistantPanel({
+  projectId = null,
+  timelineId = null,
+  storyTitle,
+  onTimelineApplied,
+}: AiAssistantPanelProps) {
   return (
-    <div className="space-y-3">
-      <p className="flex items-center gap-1.5 text-xs font-semibold uppercase tracking-wide text-muted-foreground">
-        <Sparkles className="size-3.5" />
-        AI Assistant
-      </p>
-      <ModulePlaceholder
-        title="AI editing extension point"
-        description="Future AI-assisted cuts, captions, graphics, and package suggestions will dock here. Manual editing remains the primary workflow in Module 3.0."
-      />
-    </div>
+    <TimelineIntelligencePanel
+      projectId={projectId}
+      timelineId={timelineId}
+      storyTitle={storyTitle}
+      onTimelineApplied={onTimelineApplied}
+    />
   );
 }

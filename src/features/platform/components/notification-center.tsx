@@ -1,5 +1,6 @@
 "use client";
 
+import { useEffect, useState } from "react";
 import Link from "next/link";
 import { Bell, CheckCheck, Trash2, X } from "lucide-react";
 
@@ -41,6 +42,13 @@ export function NotificationCenter() {
     dismiss,
     clear,
   } = useNotifications();
+  // Defer Sheet until after mount — Base UI Sheet/Dialog ids diverge under
+  // Next 15.5 SSR (hydration mismatch in the top nav).
+  const [sheetReady, setSheetReady] = useState(false);
+
+  useEffect(() => {
+    setSheetReady(true);
+  }, []);
 
   useKeyboardShortcut("ctrl+shift+n", () => setPanelOpen(true));
 
@@ -66,118 +74,120 @@ export function NotificationCenter() {
         ) : null}
       </Button>
 
-      <Sheet open={panelOpen} onOpenChange={setPanelOpen}>
-        <SheetContent
-          side="right"
-          className="flex w-full flex-col gap-0 p-0 sm:max-w-md"
-          aria-describedby={undefined}
-        >
-          <SheetHeader className="border-b border-border/60 px-4 py-3 text-left">
-            <div className="flex items-center justify-between gap-2 pr-8">
-              <div>
-                <SheetTitle>Notifications</SheetTitle>
-                <SheetDescription>
-                  Success, errors, warnings, and job updates.
-                </SheetDescription>
+      {sheetReady ? (
+        <Sheet open={panelOpen} onOpenChange={setPanelOpen}>
+          <SheetContent
+            side="right"
+            className="flex w-full flex-col gap-0 p-0 sm:max-w-md"
+            aria-describedby={undefined}
+          >
+            <SheetHeader className="border-b border-border/60 px-4 py-3 text-left">
+              <div className="flex items-center justify-between gap-2 pr-8">
+                <div>
+                  <SheetTitle>Notifications</SheetTitle>
+                  <SheetDescription>
+                    Success, errors, warnings, and job updates.
+                  </SheetDescription>
+                </div>
+                <Badge variant="secondary">{unreadCount} unread</Badge>
               </div>
-              <Badge variant="secondary">{unreadCount} unread</Badge>
-            </div>
-            <div className="mt-2 flex gap-2">
-              <Button
-                type="button"
-                size="sm"
-                variant="outline"
-                onClick={markAllRead}
-              >
-                <CheckCheck className="size-3.5" />
-                Mark all read
-              </Button>
-              <Button type="button" size="sm" variant="ghost" onClick={clear}>
-                <Trash2 className="size-3.5" />
-                Clear
-              </Button>
-            </div>
-          </SheetHeader>
+              <div className="mt-2 flex gap-2">
+                <Button
+                  type="button"
+                  size="sm"
+                  variant="outline"
+                  onClick={markAllRead}
+                >
+                  <CheckCheck className="size-3.5" />
+                  Mark all read
+                </Button>
+                <Button type="button" size="sm" variant="ghost" onClick={clear}>
+                  <Trash2 className="size-3.5" />
+                  Clear
+                </Button>
+              </div>
+            </SheetHeader>
 
-          <ScrollArea className="flex-1">
-            {notifications.length === 0 ? (
-              <p className="p-6 text-sm text-muted-foreground">
-                No notifications yet.
-              </p>
-            ) : (
-              <ul className="divide-y divide-border/60">
-                {notifications.map((item) => {
-                  const tone = notificationTone(item.kind);
-                  const body = (
-                    <div className="flex gap-3 px-4 py-3">
-                      <span
-                        className={cn(
-                          "mt-1.5 size-2 shrink-0 rounded-full",
-                          STATUS_TONE_CLASSES[tone].dot,
-                        )}
-                        aria-hidden
-                      />
-                      <div className="min-w-0 flex-1">
-                        <div className="flex items-start justify-between gap-2">
-                          <p
-                            className={cn(
-                              "text-sm font-medium",
-                              !item.read && "text-foreground",
-                              item.read && "text-muted-foreground",
-                            )}
-                          >
-                            {item.title}
+            <ScrollArea className="flex-1">
+              {notifications.length === 0 ? (
+                <p className="p-6 text-sm text-muted-foreground">
+                  No notifications yet.
+                </p>
+              ) : (
+                <ul className="divide-y divide-border/60">
+                  {notifications.map((item) => {
+                    const tone = notificationTone(item.kind);
+                    const body = (
+                      <div className="flex gap-3 px-4 py-3">
+                        <span
+                          className={cn(
+                            "mt-1.5 size-2 shrink-0 rounded-full",
+                            STATUS_TONE_CLASSES[tone].dot,
+                          )}
+                          aria-hidden
+                        />
+                        <div className="min-w-0 flex-1">
+                          <div className="flex items-start justify-between gap-2">
+                            <p
+                              className={cn(
+                                "text-sm font-medium",
+                                !item.read && "text-foreground",
+                                item.read && "text-muted-foreground",
+                              )}
+                            >
+                              {item.title}
+                            </p>
+                            <Button
+                              type="button"
+                              size="icon-sm"
+                              variant="ghost"
+                              aria-label="Dismiss notification"
+                              onClick={(e) => {
+                                e.preventDefault();
+                                dismiss(item.id);
+                              }}
+                            >
+                              <X className="size-3.5" />
+                            </Button>
+                          </div>
+                          <p className="text-[11px] text-muted-foreground">
+                            {KIND_LABEL[item.kind]} ·{" "}
+                            <RelativeTime value={item.createdAt} />
                           </p>
-                          <Button
-                            type="button"
-                            size="icon-sm"
-                            variant="ghost"
-                            aria-label="Dismiss notification"
-                            onClick={(e) => {
-                              e.preventDefault();
-                              dismiss(item.id);
-                            }}
-                          >
-                            <X className="size-3.5" />
-                          </Button>
+                          {item.body ? (
+                            <p className="mt-1 text-xs text-muted-foreground">
+                              {item.body}
+                            </p>
+                          ) : null}
                         </div>
-                        <p className="text-[11px] text-muted-foreground">
-                          {KIND_LABEL[item.kind]} ·{" "}
-                          <RelativeTime value={item.createdAt} />
-                        </p>
-                        {item.body ? (
-                          <p className="mt-1 text-xs text-muted-foreground">
-                            {item.body}
-                          </p>
-                        ) : null}
                       </div>
-                    </div>
-                  );
+                    );
 
-                  return (
-                    <li
-                      key={item.id}
-                      className={cn(!item.read && "bg-muted/30")}
-                    >
-                      {item.href ? (
-                        <Link
-                          href={item.href}
-                          onClick={() => setPanelOpen(false)}
-                          className="block hover:bg-muted/40"
-                        >
-                          {body}
-                        </Link>
-                      ) : (
-                        body
-                      )}
-                    </li>
-                  );
-                })}
-              </ul>
-            )}
-          </ScrollArea>
-        </SheetContent>
-      </Sheet>
+                    return (
+                      <li
+                        key={item.id}
+                        className={cn(!item.read && "bg-muted/30")}
+                      >
+                        {item.href ? (
+                          <Link
+                            href={item.href}
+                            onClick={() => setPanelOpen(false)}
+                            className="block hover:bg-muted/40"
+                          >
+                            {body}
+                          </Link>
+                        ) : (
+                          body
+                        )}
+                      </li>
+                    );
+                  })}
+                </ul>
+              )}
+            </ScrollArea>
+          </SheetContent>
+        </Sheet>
+      ) : null}
     </>
   );
 }

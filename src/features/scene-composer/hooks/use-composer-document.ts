@@ -17,6 +17,10 @@ import {
   patchGnn001EdgeSweepDemos,
 } from "@/features/scene-composer/lib/edge-sweep";
 import {
+  needsGnn001LightSweepDemoPatch,
+  patchGnn001LightSweepDemos,
+} from "@/features/scene-composer/lib/broadcast-effects";
+import {
   needsShapeComposerSeed,
   seedShapeComposerOnAllLayers,
 } from "@/features/scene-composer/lib/shape-composer";
@@ -57,9 +61,16 @@ function withDocumentSeeds(scene: ComposerScene): ComposerScene {
       objects = patchGnn001EdgeSweepDemos(objects);
       changed = true;
     }
+    // Morning demo: Headline Light Sweep (covers Lower Information Panel).
+    // Additive only — never clears Shape Composer metadata.
+    if (needsGnn001LightSweepDemoPatch(objects)) {
+      objects = patchGnn001LightSweepDemos(objects);
+      changed = true;
+    }
   }
 
   // Shape Composer on every layer that does not already have config.
+  // Runs after effect demos so shape + effects coexist on the same objects.
   if (needsShapeComposerSeed(objects)) {
     objects = seedShapeComposerOnAllLayers(objects);
     changed = true;
@@ -85,6 +96,8 @@ export function useComposerDocument(initialScene: ComposerScene) {
   const [revision, setRevision] = useState(0);
 
   useEffect(() => {
+    // Only remount document when switching scenes. Do not reset on updated_at —
+    // autosave/revalidate used to bump updated_at and re-seed in a tight loop.
     setScene(withDocumentSeeds(initialScene));
     history.clear();
   }, [initialScene.id]);
@@ -116,6 +129,65 @@ export function useComposerDocument(initialScene: ComposerScene) {
             ...current,
             composer_document: nextDoc,
             scene_document: { ...nextDoc, layers: objectsToLayers(nextDoc.objects) },
+          })),
+      });
+    },
+    [scene.composer_document],
+  );
+
+  /** Update objects without pushing undo history (live drag). */
+  const replaceObjectsSilent = useCallback((objects: SceneObject[]) => {
+    setScene((current) => {
+      const nextDoc = {
+        ...current.composer_document,
+        objects,
+        layers: objectsToLayers(objects),
+      };
+      return {
+        ...current,
+        composer_document: nextDoc,
+        scene_document: nextDoc,
+      };
+    });
+  }, []);
+
+  /**
+   * Commit objects with an explicit previous snapshot (one undo step for drag/resize).
+   */
+  const commitObjectsChange = useCallback(
+    (
+      nextObjects: SceneObject[],
+      previousObjects: SceneObject[],
+      label = "Edit objects",
+    ) => {
+      const nextDoc: ComposerSceneDocument = {
+        ...scene.composer_document,
+        objects: nextObjects,
+        layers: objectsToLayers(nextObjects),
+      };
+      const prevDoc: ComposerSceneDocument = {
+        ...scene.composer_document,
+        objects: previousObjects,
+        layers: objectsToLayers(previousObjects),
+      };
+      setScene((current) => ({
+        ...current,
+        composer_document: nextDoc,
+        scene_document: nextDoc,
+      }));
+      history.push({
+        label,
+        undo: () =>
+          setScene((current) => ({
+            ...current,
+            composer_document: prevDoc,
+            scene_document: prevDoc,
+          })),
+        redo: () =>
+          setScene((current) => ({
+            ...current,
+            composer_document: nextDoc,
+            scene_document: nextDoc,
           })),
       });
     },
@@ -157,6 +229,8 @@ export function useComposerDocument(initialScene: ComposerScene) {
       scene,
       revision,
       setObjects,
+      replaceObjectsSilent,
+      commitObjectsChange,
       applyDocument,
       updateSceneMeta,
       updateSettings,
@@ -170,6 +244,8 @@ export function useComposerDocument(initialScene: ComposerScene) {
       scene,
       revision,
       setObjects,
+      replaceObjectsSilent,
+      commitObjectsChange,
       applyDocument,
       updateSceneMeta,
       updateSettings,
@@ -181,18 +257,21 @@ export function useComposerDocument(initialScene: ComposerScene) {
 export function useComposerAutosave(
   scene: ComposerScene,
   saveFn: (scene: ComposerScene) => Promise<void>,
-  delayMs = 900,
+  /** Debounce inactivity before writing — keep high to cut egress on drag/scrub. */
+  delayMs = 3500,
 ) {
   const timer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const sceneRef = useRef(scene);
   sceneRef.current = scene;
+  const saveFnRef = useRef(saveFn);
+  saveFnRef.current = saveFn;
 
   const schedule = useCallback(() => {
     if (timer.current) clearTimeout(timer.current);
     timer.current = setTimeout(() => {
-      void saveFn(sceneRef.current);
+      void saveFnRef.current(sceneRef.current);
     }, delayMs);
-  }, [delayMs, saveFn]);
+  }, [delayMs]);
 
   useEffect(() => {
     return () => {

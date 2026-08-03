@@ -12,6 +12,9 @@ import type {
 
 type Client = SupabaseClient<Database>;
 
+export const CONTENT_OBJECT_SELECT =
+  "id, organization_id, story_id, type, title, status, language, metadata, version, created_by, updated_by, created_at, updated_at, deleted_at";
+
 /**
  * ContentService — foundation for story-scoped content objects.
  * Architecture only: CRUD scaffolding, no domain workflows.
@@ -23,7 +26,7 @@ export async function listContentObjects(
 ): Promise<ContentServiceResult<ContentObject[]>> {
   let query = client
     .from("content_objects")
-    .select("*")
+    .select(CONTENT_OBJECT_SELECT)
     .eq("organization_id", scope.organizationId)
     .eq("story_id", scope.storyId)
     .order("updated_at", { ascending: false });
@@ -46,7 +49,7 @@ export async function getContentObject(
 ): Promise<ContentServiceResult<ContentObject>> {
   const { data, error } = await client
     .from("content_objects")
-    .select("*")
+    .select(CONTENT_OBJECT_SELECT)
     .eq("id", id)
     .is("deleted_at", null)
     .maybeSingle();
@@ -63,7 +66,7 @@ export async function createContentObject(
   const { data, error } = await client
     .from("content_objects")
     .insert(input)
-    .select("*")
+    .select(CONTENT_OBJECT_SELECT)
     .single();
 
   if (error) return { data: null, error: error.message };
@@ -80,7 +83,7 @@ export async function updateContentObject(
     .update(patch)
     .eq("id", id)
     .is("deleted_at", null)
-    .select("*")
+    .select(CONTENT_OBJECT_SELECT)
     .single();
 
   if (error) return { data: null, error: error.message };

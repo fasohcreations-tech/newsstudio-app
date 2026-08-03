@@ -1,5 +1,6 @@
 "use client";
 
+import { useEffect, useState } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { ChevronsUpDown, LogOut, Settings, User } from "lucide-react";
@@ -25,9 +26,40 @@ type ProfileMenuProps = {
   profile: ProfileSummary;
 };
 
+function ProfileMenuChrome({
+  profile,
+  displayName,
+}: {
+  profile: ProfileSummary;
+  displayName: string;
+}) {
+  return (
+    <>
+      <AvatarPlaceholder
+        name={profile.full_name}
+        email={profile.email}
+        avatarUrl={profile.avatar_url}
+      />
+      <div className="hidden min-w-0 text-left md:block">
+        <p className="truncate text-sm font-medium leading-none">{displayName}</p>
+        <p className="truncate text-xs text-muted-foreground">{profile.email}</p>
+      </div>
+      <ChevronsUpDown className="hidden size-4 text-muted-foreground md:block" />
+    </>
+  );
+}
+
 export function ProfileMenu({ profile }: ProfileMenuProps) {
   const router = useRouter();
   const displayName = profile.full_name?.trim() || profile.email;
+  // Base UI Menu Trigger mints useId()-based ids that diverge between SSR and
+  // client under Next 15.5 (same class of bug as sidebar TooltipTrigger).
+  // Keep first paint as a plain button; attach the menu after mount.
+  const [menuReady, setMenuReady] = useState(false);
+
+  useEffect(() => {
+    setMenuReady(true);
+  }, []);
 
   async function handleLogout() {
     const supabase = createClient();
@@ -43,27 +75,34 @@ export function ProfileMenu({ profile }: ProfileMenuProps) {
     router.refresh();
   }
 
+  const triggerClassName =
+    "h-auto gap-2 px-2 py-1.5 data-popup-open:bg-accent";
+
+  if (!menuReady) {
+    return (
+      <Button
+        variant="ghost"
+        className={triggerClassName}
+        aria-label="Open profile menu"
+        disabled
+      >
+        <ProfileMenuChrome profile={profile} displayName={displayName} />
+      </Button>
+    );
+  }
+
   return (
     <DropdownMenu>
       <DropdownMenuTrigger
         render={
           <Button
             variant="ghost"
-            className="h-auto gap-2 px-2 py-1.5 data-popup-open:bg-accent"
+            className={triggerClassName}
             aria-label="Open profile menu"
           />
         }
       >
-        <AvatarPlaceholder
-          name={profile.full_name}
-          email={profile.email}
-          avatarUrl={profile.avatar_url}
-        />
-        <div className="hidden min-w-0 text-left md:block">
-          <p className="truncate text-sm font-medium leading-none">{displayName}</p>
-          <p className="truncate text-xs text-muted-foreground">{profile.email}</p>
-        </div>
-        <ChevronsUpDown className="hidden size-4 text-muted-foreground md:block" />
+        <ProfileMenuChrome profile={profile} displayName={displayName} />
       </DropdownMenuTrigger>
       <DropdownMenuContent align="end" className="w-56">
         <DropdownMenuLabel className="font-normal">

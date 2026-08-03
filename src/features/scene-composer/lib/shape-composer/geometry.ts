@@ -61,7 +61,13 @@ export function resolveRadii(
 ): ShapeCornerRadii {
   const maxR = Math.min(width, height) / 2;
   if (config.uniformCorners) {
-    const r = Math.min(maxR, Math.max(0, config.cornerRadii.topLeft || config.radius));
+    // Don't use `|| config.radius` — corner 0 is valid, and radius 999 (circle)
+    // would turn rectangles into capsules/ellipses.
+    const raw =
+      typeof config.cornerRadii.topLeft === "number"
+        ? config.cornerRadii.topLeft
+        : config.radius;
+    const r = Math.min(maxR, Math.max(0, raw));
     return { topLeft: r, topRight: r, bottomRight: r, bottomLeft: r };
   }
   return {

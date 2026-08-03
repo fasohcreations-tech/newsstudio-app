@@ -80,6 +80,7 @@ export function LayerMotionFields({
   ) => {
     const next = patchLayerMotionConfig(object, patch);
     onObjectPatch(object.id, { metadata: next.metadata });
+    onPreview?.();
   };
 
   return (
@@ -106,16 +107,19 @@ export function LayerMotionFields({
 
       <Field label="Motion Preset">
         <Select
-          value={
-            typeof object.metadata?.motion_preset_id === "string"
-              ? object.metadata.motion_preset_id
-              : undefined
-          }
+          // Omit value when unset — value={null} action/sync pattern can
+          // re-emit a catalog id and re-patch every render.
+          {...(typeof object.metadata?.motion_preset_id === "string"
+            ? { value: object.metadata.motion_preset_id }
+            : {})}
           onValueChange={(value) => {
-            const preset = library.getById(value ?? "");
+            if (!value) return;
+            if (value === object.metadata?.motion_preset_id) return;
+            const preset = library.getById(value);
             if (!preset) return;
             const next = applyMotionPresetToObject(object, preset);
             onObjectPatch(object.id, { metadata: next.metadata });
+            onPreview?.();
           }}
         >
           <SelectTrigger className={EDITOR_UI.input}>
@@ -160,6 +164,7 @@ export function LayerMotionFields({
             const next = applyMotionPresetToObject(object, saved);
             onObjectPatch(object.id, { metadata: next.metadata });
             setSaveName("");
+            onPreview?.();
           }}
         >
           Save custom preset

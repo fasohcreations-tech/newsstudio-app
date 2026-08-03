@@ -19,11 +19,10 @@ export function buildDefaultBindings(): Record<string, string> {
     organization: "GNN News",
     reporter: "റിപ്പോർട്ടർ",
     location: "തിരുവനന്തപുരം",
-    date: new Date().toLocaleDateString("ml-IN"),
-    time: new Date().toLocaleTimeString("ml-IN", {
-      hour: "2-digit",
-      minute: "2-digit",
-    }),
+    // Fixed demo clock — live Date() here made mergeStoryDataBindings emit a
+    // different bindings object every call and could re-trigger parent setState.
+    date: "28 ജൂലൈ 2026",
+    time: "08:00",
     logo: "GNN",
     image: "",
     video: "",

@@ -45,6 +45,7 @@ export class ComposerHistoryService {
   }
 
   clear() {
+    if (this.undoStack.length === 0 && this.redoStack.length === 0) return;
     this.undoStack = [];
     this.redoStack = [];
     this.emit();

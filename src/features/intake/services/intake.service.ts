@@ -15,11 +15,20 @@ import { createIntakeExtractors } from "@/features/intake/services/extractors";
 
 type Client = SupabaseClient<Database>;
 
+const SOURCE_ITEM_COLUMNS =
+  "id, organization_id, source_type_id, original_url, title, extraction_status, imported_at, reporter_id, media_asset_id, metadata, extracted_content, extracted_metadata, error, created_by, updated_by, created_at, updated_at, deleted_at";
+
 const SOURCE_ITEM_SELECT = `
-  *,
+  ${SOURCE_ITEM_COLUMNS},
   source_type:source_types!source_items_source_type_id_fkey(id, code, name, category),
   reporter:profiles!source_items_reporter_id_fkey(id, full_name, email)
 `;
+
+const SOURCE_TYPE_SELECT =
+  "id, code, name, category, description, is_active, sort_order, created_at, updated_at";
+
+const STORY_SOURCE_SELECT =
+  "id, organization_id, story_id, source_item_id, is_primary, created_by, created_at, updated_at, deleted_at";
 
 /**
  * IntakeService — queue + provenance scaffolding.
@@ -30,7 +39,7 @@ export async function listSourceTypes(
 ): Promise<IntakeServiceResult<SourceType[]>> {
   const { data, error } = await client
     .from("source_types")
-    .select("*")
+    .select(SOURCE_TYPE_SELECT)
     .eq("is_active", true)
     .order("sort_order", { ascending: true });
 
@@ -44,7 +53,7 @@ export async function getSourceTypeByCode(
 ): Promise<IntakeServiceResult<SourceType>> {
   const { data, error } = await client
     .from("source_types")
-    .select("*")
+    .select(SOURCE_TYPE_SELECT)
     .eq("code", code)
     .eq("is_active", true)
     .maybeSingle();
@@ -185,7 +194,7 @@ export async function updateSourceItemStatus(
     })
     .eq("id", id)
     .is("deleted_at", null)
-    .select("*")
+    .select(SOURCE_ITEM_COLUMNS)
     .single();
 
   if (error) return { data: null, error: error.message };
@@ -294,7 +303,7 @@ export async function listStorySources(
 ): Promise<IntakeServiceResult<StorySource[]>> {
   const { data, error } = await client
     .from("story_sources")
-    .select("*")
+    .select(STORY_SOURCE_SELECT)
     .eq("story_id", storyId)
     .is("deleted_at", null)
     .order("created_at", { ascending: true });

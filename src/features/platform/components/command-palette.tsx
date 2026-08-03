@@ -47,6 +47,13 @@ export function CommandPalette() {
   const [hits, setHits] = useState<GlobalSearchHit[]>([]);
   const [searchError, setSearchError] = useState<string | null>(null);
   const [pending, startTransition] = useTransition();
+  // Defer Dialog until after mount — Base UI Dialog useId attrs diverge under
+  // Next 15.5 SSR and cause hydration mismatches in the app shell.
+  const [ready, setReady] = useState(false);
+
+  useEffect(() => {
+    setReady(true);
+  }, []);
 
   useKeyboardShortcut("ctrl+k", () => toggle(), { allowInInputs: true });
 
@@ -125,7 +132,7 @@ export function CommandPalette() {
     [],
   );
 
-  return (
+  return ready ? (
     <Dialog open={open} onOpenChange={setOpen}>
       <DialogContent
         className="gap-0 overflow-hidden p-0 sm:max-w-xl"
@@ -247,5 +254,5 @@ export function CommandPalette() {
         </Command>
       </DialogContent>
     </Dialog>
-  );
+  ) : null;
 }

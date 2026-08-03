@@ -15,6 +15,15 @@ import type {
 
 type Client = SupabaseClient;
 
+const CREATIVE_TIMELINE_SELECT =
+  "id, organization_id, project_id, title, duration_ms, zoom_level, snap_enabled, playhead_ms, metadata, created_at, updated_at, story_id, scene_id, content_object_id, voice_segment_id, script_paragraph_id, magnetic_enabled, ripple_mode";
+
+const TIMELINE_LINK_SELECT =
+  "id, organization_id, timeline_id, clip_id, kind, target_id, label, metadata, created_at, updated_at";
+
+const TIMELINE_MARKER_SELECT =
+  "id, organization_id, timeline_id, start_ms, label, color, metadata, created_by, created_at";
+
 function ok<T>(data: T): CreativeServiceResult<T> {
   return { data, error: null };
 }
@@ -55,7 +64,7 @@ export class SupabaseEnterpriseTimelineService implements EnterpriseTimelineServ
   ): Promise<CreativeServiceResult<TimelineLink[]>> {
     const { data, error } = await this.client
       .from("creative_studio_timeline_links")
-      .select("*")
+      .select(TIMELINE_LINK_SELECT)
       .eq("timeline_id", timelineId)
       .order("created_at", { ascending: true });
 
@@ -73,7 +82,7 @@ export class SupabaseEnterpriseTimelineService implements EnterpriseTimelineServ
       .from("creative_studio_timelines")
       .update(patch)
       .eq("id", timelineId)
-      .select("*")
+      .select(CREATIVE_TIMELINE_SELECT)
       .single();
 
     if (error || !data) {
@@ -87,7 +96,7 @@ export class SupabaseEnterpriseTimelineService implements EnterpriseTimelineServ
   ): Promise<CreativeServiceResult<TimelineMarker[]>> {
     const { data, error } = await this.client
       .from("creative_studio_timeline_markers")
-      .select("*")
+      .select(TIMELINE_MARKER_SELECT)
       .eq("timeline_id", timelineId)
       .order("start_ms", { ascending: true });
 
@@ -111,7 +120,7 @@ export class SupabaseEnterpriseTimelineService implements EnterpriseTimelineServ
         label,
         created_by: userId,
       })
-      .select("*")
+      .select(TIMELINE_MARKER_SELECT)
       .single();
 
     if (error || !data) {

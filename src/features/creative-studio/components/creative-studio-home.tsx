@@ -31,6 +31,8 @@ import {
 } from "@/features/creative-studio/actions/project.actions";
 import type { CreativeProject } from "@/features/creative-studio/types/creative-studio.types";
 import { RelativeTime } from "@/features/newsroom/components/relative-time";
+import { SceneIntelligencePanel } from "@/features/ai/intelligence/components/scene-intelligence-panel";
+import { TimelineIntelligenceHomeCard } from "@/features/ai/intelligence/components/timeline-intelligence-home-card";
 
 type CreativeStudioHomeProps = {
   organizationId: string;
@@ -92,6 +94,13 @@ export function CreativeStudioHome({
           </Button>
         </div>
       </div>
+
+      <SceneIntelligencePanel storyType="news" language="en" />
+
+      <TimelineIntelligenceHomeCard
+        projects={projects}
+        onOpenCreate={() => setCreateOpen(true)}
+      />
 
       <Card className="border-primary/20 bg-primary/5">
         <CardContent className="flex flex-wrap items-center justify-between gap-4 py-4">

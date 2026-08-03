@@ -5,6 +5,7 @@ import {
   GNN_BROADCAST_PACKAGE_ID,
   GNN_COMPONENT_LIBRARY,
   GNN_DESIGN_SYSTEM,
+  GNN_MASTER_SCENE_CODES,
   GNN_MOTION_PRESETS,
 } from "@/features/scene-composer/constants/gnn-broadcast-package.constants";
 import { composerDb } from "@/features/scene-composer/lib/composer-db";
@@ -47,6 +48,7 @@ import type {
 } from "@/features/scene-composer/types/scene-composer.types";
 import type { MotionSceneWithRelations } from "@/features/motion-scene-engine/types/motion-scene.types";
 import { createMotionSceneService } from "@/features/motion-scene-engine/services/motion-scene.service.impl";
+import { withQueryLog } from "@/shared/lib/supabase/query-log";
 
 type Client = SupabaseClient;
 
@@ -112,67 +114,119 @@ export class SupabaseSceneComposerService {
       metadata?: Record<string, unknown>;
     },
     userId: string,
+    options?: { syncTables?: boolean },
   ) {
+    const syncTables = options?.syncTables === true;
     const syncedLayers = objectsToLayers(patch.composer_document.objects);
     const document = {
       ...patch.composer_document,
       layers: syncedLayers,
     };
 
-    const motion = createMotionSceneService(this.client);
-    const existing = await motion.getScene(sceneId);
-    const mergedProperties = {
-      ...(existing.data?.properties ?? {}),
-      composer_settings: patch.composer_settings ?? existing.data?.properties?.composer_settings,
+    const objectCount = patch.composer_document.objects.length;
+    const mergedMetadata = {
+      ...(patch.metadata ?? {}),
+      layer_count: syncedLayers.length,
+      object_count: objectCount,
     };
 
-    const result = await motion.updateScene(
-      sceneId,
+    // Single UPDATE — no pre-fetch, no second workflow UPDATE, no full-document
+    // response body. Relational table sync is opt-in (explicit Save / checkpoint).
+    const { data, error } = await withQueryLog(
+      `saveComposerScene:${sceneId}:${syncTables ? "checkpoint" : "autosave"}`,
+      async () =>
+        await this.db()
+          .from("creative_studio_motion_scenes")
+          .update({
+            name: patch.name,
+            duration_ms: patch.duration_ms,
+            scene_document: document,
+            resolved_bindings: patch.resolved_bindings,
+            metadata: mergedMetadata,
+            workflow_state: patch.workflow_state,
+            frame_rate: patch.frame_rate,
+            composer_settings: patch.composer_settings,
+            updated_by: userId,
+          })
+          .eq("id", sceneId)
+          .is("deleted_at", null)
+          .select(
+            "id, organization_id, project_id, category_id, brand_kit_id, parent_scene_id, scene_type, name, description, aspect_format, theme_mode, duration_ms, canvas, properties, preview, metadata, resolved_bindings, is_template, is_favorite, version, workflow_state, frame_rate, composer_settings, created_at, updated_at, created_by, updated_by",
+          )
+          .single(),
       {
-        name: patch.name,
-        duration_ms: patch.duration_ms,
-        scene_document: document,
-        properties: mergedProperties,
-        resolved_bindings: patch.resolved_bindings,
-        metadata: patch.metadata
-          ? {
-              ...(existing.data?.metadata ?? {}),
-              ...patch.metadata,
-            }
-          : undefined,
+        rowCount: (r) => (r.data ? 1 : 0),
+        payload: (r) => r.data,
       },
-      userId,
     );
 
-    if (!result.data) return fail<ComposerScene>(result.error ?? "Save failed");
+    if (error || !data) {
+      return fail<ComposerScene>(error?.message ?? "Save failed");
+    }
 
-    await this.syncComposerTables(result.data.organization_id, sceneId, patch);
+    const row = data as Record<string, unknown>;
+    const organizationId = row.organization_id as string;
 
-    const { error: wfError } = await this.db()
-      .from("creative_studio_motion_scenes")
-      .update({
-        workflow_state: patch.workflow_state,
-        frame_rate: patch.frame_rate,
-        composer_settings: patch.composer_settings,
-        updated_by: userId,
-      })
-      .eq("id", sceneId);
+    if (syncTables) {
+      try {
+        await this.syncComposerTables(organizationId, sceneId, patch);
+      } catch (syncError) {
+        return fail<ComposerScene>(
+          syncError instanceof Error
+            ? syncError.message
+            : "Composer table sync failed",
+        );
+      }
+    }
 
-    if (wfError) return fail<ComposerScene>(wfError.message);
-
-    return this.getComposerScene(sceneId);
+    // Return local merge — do not re-download scene_document.
+    return ok(
+      toComposerScene({
+        ...(row as unknown as MotionSceneWithRelations),
+        workflow_state:
+          (patch.workflow_state as ComposerScene["workflow_state"]) ??
+          (row.workflow_state as ComposerScene["workflow_state"]) ??
+          "draft",
+        frame_rate:
+          patch.frame_rate ?? (row.frame_rate as number | undefined) ?? 30,
+        properties: {
+          ...((row.properties as Record<string, unknown>) ?? {}),
+          composer_settings:
+            patch.composer_settings ??
+            (row.composer_settings as ComposerScene["composer_settings"]) ??
+            ((row.properties as { composer_settings?: ComposerScene["composer_settings"] })
+              ?.composer_settings),
+        },
+        metadata: {
+          ...((row.metadata as Record<string, unknown>) ?? {}),
+          ...mergedMetadata,
+        },
+        scene_document: document,
+        resolved_bindings:
+          patch.resolved_bindings ??
+          ((row.resolved_bindings as Record<string, string>) ?? {}),
+      } as MotionSceneWithRelations),
+    );
   }
 
   async listComponents(organizationId: string) {
+    // Library UI only needs identity/metadata — object_tree is large JSON.
     const { data, error } = await this.db()
       .from("creative_studio_scene_components")
-      .select("*")
+      .select(
+        "id, organization_id, component_kind, name, slug, description, version, is_system, default_bindings, metadata, created_at, updated_at, created_by, updated_by",
+      )
       .eq("organization_id", organizationId)
       .is("deleted_at", null)
       .order("name");
 
     if (error) return fail<SceneComponent[]>(error.message);
-    return ok((data ?? []) as SceneComponent[]);
+    return ok(
+      (data ?? []).map((row) => ({
+        ...(row as SceneComponent),
+        object_tree: [],
+      })),
+    );
   }
 
   async ensureDefaults(organizationId: string, userId: string) {
@@ -240,16 +294,20 @@ export class SupabaseSceneComposerService {
   ) {
     const doc = patch.composer_document;
 
-    await this.db()
-      .from("creative_studio_scene_objects")
-      .delete()
-      .eq("scene_id", sceneId);
+    // Deduplicate by id — document bugs / dual seeds can otherwise trip pkey.
+    const objectsById = new Map(
+      doc.objects.map((obj) => [obj.id, obj] as const),
+    );
+    const objects = [...objectsById.values()];
+    const objectIds = objects.map((obj) => obj.id);
 
-    if (doc.objects.length > 0) {
-      await this.db()
+    // Upsert first so saves succeed even before DELETE is granted (migration 000018).
+    // The old delete→insert path hit duplicate pkey because RLS blocked deletes.
+    if (objects.length > 0) {
+      const { error: objectsError } = await this.db()
         .from("creative_studio_scene_objects")
-        .insert(
-          doc.objects.map((obj) => ({
+        .upsert(
+          objects.map((obj) => ({
             id: obj.id,
             organization_id: organizationId,
             scene_id: sceneId,
@@ -270,19 +328,37 @@ export class SupabaseSceneComposerService {
             bindings: obj.bindings,
             metadata: obj.metadata,
           })),
+          { onConflict: "id" },
         );
+      if (objectsError) {
+        throw new Error(`Object sync failed: ${objectsError.message}`);
+      }
     }
 
-    await this.db()
-      .from("creative_studio_scene_bindings")
-      .delete()
-      .eq("scene_id", sceneId);
+    // Best-effort orphan cleanup (needs DELETE grant from migration 000018).
+    // Until that migration is applied, Postgres returns permission denied — ignore it.
+    {
+      let orphanQuery = this.db()
+        .from("creative_studio_scene_objects")
+        .delete()
+        .eq("scene_id", sceneId);
+      if (objectIds.length > 0) {
+        orphanQuery = orphanQuery.not("id", "in", `(${objectIds.join(",")})`);
+      }
+      await orphanQuery;
+    }
 
-    if (doc.bindings.length > 0) {
-      await this.db()
+    const bindingsById = new Map(
+      doc.bindings.map((binding) => [binding.id, binding] as const),
+    );
+    const bindings = [...bindingsById.values()];
+    const bindingIds = bindings.map((b) => b.id);
+
+    if (bindings.length > 0) {
+      const { error: bindingsError } = await this.db()
         .from("creative_studio_scene_bindings")
-        .insert(
-          doc.bindings.map((binding) => ({
+        .upsert(
+          bindings.map((binding) => ({
             id: binding.id,
             organization_id: organizationId,
             scene_id: sceneId,
@@ -296,19 +372,35 @@ export class SupabaseSceneComposerService {
             metadata: binding.metadata,
             sort_order: binding.sort_order,
           })),
+          { onConflict: "id" },
         );
+      if (bindingsError) {
+        throw new Error(`Binding sync failed: ${bindingsError.message}`);
+      }
     }
 
-    await this.db()
-      .from("creative_studio_scene_keyframes")
-      .delete()
-      .eq("scene_id", sceneId);
+    {
+      let orphanQuery = this.db()
+        .from("creative_studio_scene_bindings")
+        .delete()
+        .eq("scene_id", sceneId);
+      if (bindingIds.length > 0) {
+        orphanQuery = orphanQuery.not("id", "in", `(${bindingIds.join(",")})`);
+      }
+      await orphanQuery;
+    }
 
-    if (doc.keyframes.length > 0) {
-      await this.db()
+    const keyframesById = new Map(
+      doc.keyframes.map((kf) => [kf.id, kf] as const),
+    );
+    const keyframes = [...keyframesById.values()];
+    const keyframeIds = keyframes.map((kf) => kf.id);
+
+    if (keyframes.length > 0) {
+      const { error: keyframesError } = await this.db()
         .from("creative_studio_scene_keyframes")
-        .insert(
-          doc.keyframes.map((kf) => ({
+        .upsert(
+          keyframes.map((kf) => ({
             id: kf.id,
             organization_id: organizationId,
             scene_id: sceneId,
@@ -322,7 +414,26 @@ export class SupabaseSceneComposerService {
             sort_order: kf.sort_order,
             metadata: kf.metadata,
           })),
+          { onConflict: "id" },
         );
+      if (keyframesError) {
+        throw new Error(`Keyframe sync failed: ${keyframesError.message}`);
+      }
+    }
+
+    {
+      let orphanQuery = this.db()
+        .from("creative_studio_scene_keyframes")
+        .delete()
+        .eq("scene_id", sceneId);
+      if (keyframeIds.length > 0) {
+        orphanQuery = orphanQuery.not(
+          "id",
+          "in",
+          `(${keyframeIds.join(",")})`,
+        );
+      }
+      await orphanQuery;
     }
 
     await this.db()
@@ -331,10 +442,10 @@ export class SupabaseSceneComposerService {
         {
           organization_id: organizationId,
           scene_id: sceneId,
-          duration_ms: patch.duration_ms ?? doc.objects[0]?.end_ms ?? 5000,
+          duration_ms: patch.duration_ms ?? objects[0]?.end_ms ?? 5000,
           frame_rate: patch.frame_rate ?? 30,
           markers: [],
-          tracks: doc.objects.map((obj) => ({
+          tracks: objects.map((obj) => ({
             id: `track-${obj.id}`,
             object_id: obj.id,
             name: obj.name,
@@ -378,11 +489,17 @@ export class SupabaseSceneComposerService {
   ) {
     const { data: existing } = await this.db()
       .from("creative_studio_scene_components")
-      .select("id, slug")
+      .select("id, slug, metadata")
       .eq("organization_id", organizationId)
       .is("deleted_at", null);
 
-    const slugs = new Set((existing ?? []).map((row) => String(row.slug)));
+    const bySlug = new Map(
+      (existing ?? []).map((row) => [
+        String(row.slug),
+        row as { id: string; slug: string; metadata: Record<string, unknown> | null },
+      ]),
+    );
+    const slugs = new Set(bySlug.keys());
     const frameComponents = buildGnn001FrameComponentRecords();
     const mainVideoComponent = buildGnn001MainVideoComponentRecord();
     const candidates = [
@@ -437,8 +554,12 @@ export class SupabaseSceneComposerService {
         );
     }
 
-    // Keep GNN-001 skeleton component trees in sync.
+    // Keep GNN-001 skeleton component trees in sync — only when version drifts.
     for (const component of GNN_001_SKELETON_COMPONENTS) {
+      const row = bySlug.get(component.slug);
+      const meta = (row?.metadata ?? {}) as Record<string, unknown>;
+      if (meta.layout_skeleton_version === GNN_001_SKELETON_VERSION) continue;
+
       await this.db()
         .from("creative_studio_scene_components")
         .update({
@@ -460,25 +581,35 @@ export class SupabaseSceneComposerService {
 
     // Keep GNN-001 Background Component in sync (Layer 1).
     const backgroundComponent = buildGnn001BackgroundComponentRecord();
-    await this.db()
-      .from("creative_studio_scene_components")
-      .update({
-        name: backgroundComponent.name,
-        description: backgroundComponent.description,
-        object_tree: backgroundComponent.object_tree,
-        default_bindings: backgroundComponent.default_bindings,
-        updated_by: userId,
-        metadata: {
-          ...backgroundComponent.metadata,
-          background_version: GNN_001_BACKGROUND_LAYER_VERSION,
-        },
-      })
-      .eq("organization_id", organizationId)
-      .eq("slug", GNN_001_BACKGROUND_COMPONENT_SLUG)
-      .is("deleted_at", null);
+    {
+      const row = bySlug.get(GNN_001_BACKGROUND_COMPONENT_SLUG);
+      const meta = (row?.metadata ?? {}) as Record<string, unknown>;
+      if (meta.background_version !== GNN_001_BACKGROUND_LAYER_VERSION) {
+        await this.db()
+          .from("creative_studio_scene_components")
+          .update({
+            name: backgroundComponent.name,
+            description: backgroundComponent.description,
+            object_tree: backgroundComponent.object_tree,
+            default_bindings: backgroundComponent.default_bindings,
+            updated_by: userId,
+            metadata: {
+              ...backgroundComponent.metadata,
+              background_version: GNN_001_BACKGROUND_LAYER_VERSION,
+            },
+          })
+          .eq("organization_id", organizationId)
+          .eq("slug", GNN_001_BACKGROUND_COMPONENT_SLUG)
+          .is("deleted_at", null);
+      }
+    }
 
     // Keep GNN-001 Frame Components in sync (Layer 2).
     for (const frameComponent of frameComponents) {
+      const row = bySlug.get(frameComponent.slug);
+      const meta = (row?.metadata ?? {}) as Record<string, unknown>;
+      if (meta.frame_version === GNN_001_FRAME_LAYER_VERSION) continue;
+
       await this.db()
         .from("creative_studio_scene_components")
         .update({
@@ -498,22 +629,28 @@ export class SupabaseSceneComposerService {
     }
 
     // Keep GNN-001 Main Video Container in sync (Layer 3).
-    await this.db()
-      .from("creative_studio_scene_components")
-      .update({
-        name: mainVideoComponent.name,
-        description: mainVideoComponent.description,
-        object_tree: mainVideoComponent.object_tree,
-        default_bindings: mainVideoComponent.default_bindings,
-        updated_by: userId,
-        metadata: {
-          ...mainVideoComponent.metadata,
-          main_video_version: GNN_001_MAIN_VIDEO_LAYER_VERSION,
-        },
-      })
-      .eq("organization_id", organizationId)
-      .eq("slug", GNN_001_MAIN_VIDEO_CONTAINER_SLUG)
-      .is("deleted_at", null);
+    {
+      const row = bySlug.get(GNN_001_MAIN_VIDEO_CONTAINER_SLUG);
+      const meta = (row?.metadata ?? {}) as Record<string, unknown>;
+      if (meta.main_video_version !== GNN_001_MAIN_VIDEO_LAYER_VERSION) {
+        await this.db()
+          .from("creative_studio_scene_components")
+          .update({
+            name: mainVideoComponent.name,
+            description: mainVideoComponent.description,
+            object_tree: mainVideoComponent.object_tree,
+            default_bindings: mainVideoComponent.default_bindings,
+            updated_by: userId,
+            metadata: {
+              ...mainVideoComponent.metadata,
+              main_video_version: GNN_001_MAIN_VIDEO_LAYER_VERSION,
+            },
+          })
+          .eq("organization_id", organizationId)
+          .eq("slug", GNN_001_MAIN_VIDEO_CONTAINER_SLUG)
+          .is("deleted_at", null);
+      }
+    }
   }
 
   private async ensureGnnMotionPresets(organizationId: string) {
@@ -548,26 +685,87 @@ export class SupabaseSceneComposerService {
   private async ensureGnnMasterScenes(organizationId: string, userId: string) {
     const { data: existing } = await this.db()
       .from("creative_studio_motion_scenes")
-      .select("id, metadata")
+      .select("id, name, metadata, updated_at")
       .eq("organization_id", organizationId)
       .is("deleted_at", null);
 
-    const existingByCode = new Map<string, { id: string; metadata: Record<string, unknown> }>();
-    for (const row of existing ?? []) {
-      const meta = (row.metadata as Record<string, unknown> | null) ?? {};
-      const code = meta.package_code;
-      if (typeof code === "string") {
-        existingByCode.set(code, { id: row.id as string, metadata: meta });
+    type ExistingRow = {
+      id: string;
+      name: string;
+      metadata: Record<string, unknown>;
+      updated_at: string;
+    };
+
+    const rows: ExistingRow[] = (existing ?? []).map((row) => ({
+      id: row.id as string,
+      name: String(row.name ?? ""),
+      metadata: (row.metadata as Record<string, unknown> | null) ?? {},
+      updated_at: String(row.updated_at ?? ""),
+    }));
+
+    // Prefer the most recently updated scene for each package_code.
+    const existingByCode = new Map<string, ExistingRow>();
+    for (const row of rows) {
+      const code = row.metadata.package_code;
+      if (typeof code !== "string") continue;
+      const prev = existingByCode.get(code);
+      if (!prev || row.updated_at > prev.updated_at) {
+        existingByCode.set(code, row);
       }
     }
 
     const drafts = buildGnnBroadcastSceneDrafts();
 
+    // Adopt latest same-named template when package_code is missing (old duplicates).
+    for (const draft of drafts) {
+      const code = String(draft.metadata.package_code ?? "");
+      if (!code || existingByCode.has(code)) continue;
+      const draftName = draft.name.trim().toLowerCase();
+      const matches = rows
+        .filter((row) => {
+          const base = row.name
+            .trim()
+            .toLowerCase()
+            .replace(/\s*\(copy\)\s*$/i, "")
+            .trim();
+          return (
+            base === draftName ||
+            row.name.toUpperCase().includes(code) ||
+            String(row.metadata.package_code ?? "") === code
+          );
+        })
+        .sort((a, b) => b.updated_at.localeCompare(a.updated_at));
+      const adopt = matches[0];
+      if (!adopt) continue;
+      existingByCode.set(code, adopt);
+      await this.db()
+        .from("creative_studio_motion_scenes")
+        .update({
+          name: draft.name,
+          metadata: {
+            ...adopt.metadata,
+            ...draft.metadata,
+          },
+          updated_by: userId,
+        })
+        .eq("id", adopt.id);
+    }
+
     for (const draft of drafts) {
       const code = String(draft.metadata.package_code ?? "");
       const existingScene = existingByCode.get(code);
 
-      // Refresh GNN-001 when skeleton/background version changes or background layer is missing.
+      // Fast path: GNN-001 already at current skeleton version — skip
+      // downloading the full scene_document on every library visit.
+      if (
+        code === "GNN-001" &&
+        existingScene &&
+        existingScene.metadata.layout_skeleton_version === GNN_001_SKELETON_VERSION
+      ) {
+        continue;
+      }
+
+      // Refresh GNN-001 when skeleton version changes or required layers are missing.
       const sceneDoc = existingScene
         ? (
             await this.db()
@@ -712,11 +910,64 @@ export class SupabaseSceneComposerService {
 
       if (error || !inserted) continue;
 
+      existingByCode.set(code, {
+        id: inserted.id as string,
+        name: draft.name,
+        metadata: draft.metadata as Record<string, unknown>,
+        updated_at: new Date().toISOString(),
+      });
+
       await this.syncComposerTables(organizationId, inserted.id, {
         composer_document: draft.composer_document,
         duration_ms: draft.duration_ms,
         frame_rate: 30,
       });
+    }
+
+    // Soft-delete retired codes + duplicate copies — one live file per package_code.
+    const allowedCodes = new Set<string>(GNN_MASTER_SCENE_CODES);
+    const keepIds = new Set(
+      [...existingByCode.entries()]
+        .filter(([code]) => allowedCodes.has(code as (typeof GNN_MASTER_SCENE_CODES)[number]))
+        .map(([, row]) => row.id),
+    );
+
+    const masterNames = new Set(
+      drafts.map((draft) => draft.name.trim().toLowerCase()),
+    );
+
+    const obsoleteIds = rows
+      .filter((row) => {
+        if (keepIds.has(row.id)) return false;
+
+        const packageId = row.metadata.package_id;
+        const code = row.metadata.package_code;
+        const isGnnPackage = packageId === GNN_BROADCAST_PACKAGE_ID;
+        const normalizedName = row.name.trim().toLowerCase();
+        const baseName = normalizedName.replace(/\s*\(copy\)\s*$/i, "").trim();
+
+        if (isGnnPackage) {
+          // Duplicate of an active master code, or a retired code.
+          if (typeof code === "string") return true;
+          // GNN-tagged row without code — remove if it looks like a master clone.
+          return masterNames.has(baseName) || /^gnn-\d{3}\b/i.test(row.name);
+        }
+
+        // Orphan copies named like a master scene (missing package metadata).
+        if (masterNames.has(baseName)) return true;
+
+        return false;
+      })
+      .map((row) => row.id);
+
+    if (obsoleteIds.length > 0) {
+      await this.db()
+        .from("creative_studio_motion_scenes")
+        .update({
+          deleted_at: new Date().toISOString(),
+          updated_by: userId,
+        })
+        .in("id", obsoleteIds);
     }
   }
 }

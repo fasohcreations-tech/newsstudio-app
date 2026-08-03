@@ -5,6 +5,7 @@ import {
 import {
   createDefaultReveal,
   defaultRevealEntranceBehavior,
+  syncRevealExitBehavior,
 } from "@/features/scene-composer/lib/shape-composer/reveal";
 import type {
   ShapeComposerConfig,
@@ -19,6 +20,90 @@ function isRecord(value: unknown): value is Record<string, unknown> {
   return Boolean(value) && typeof value === "object" && !Array.isArray(value);
 }
 
+export function isMainVideoContainerObject(object: SceneObject): boolean {
+  return (
+    object.metadata?.layer === "main_video_container" ||
+    object.metadata?.component_slug === "gnn-001-main-video-container" ||
+    object.name === "Main Video Container"
+  );
+}
+
+/** Main video must use a rectangular rim — never an inscribed ellipse/circle. */
+export function normalizeMainVideoFrameShape(
+  config: ShapeComposerConfig,
+  object: SceneObject,
+): ShapeComposerConfig {
+  const frameKinds = new Set([
+    "video_frame",
+    "border_frame",
+    "rounded_rectangle",
+    "rectangle",
+    "ellipse",
+    "circle",
+    "video_mask",
+    "image_mask",
+  ]);
+  const kind = frameKinds.has(config.kind) ? config.kind : "video_frame";
+  const isMaskKind =
+    kind === "ellipse" ||
+    kind === "circle" ||
+    kind === "video_mask" ||
+    kind === "image_mask";
+  const revealOn = config.reveal?.enabled !== false;
+  const corner = Math.min(
+    24,
+    Math.max(
+      0,
+      Number(
+        object.style.corner_radius ??
+          config.cornerRadii.topLeft ??
+          10,
+      ) || 10,
+    ),
+  );
+  // Reveal on: solid cover shape → exit → video. Reveal off: stroke rim only.
+  // Use a clearly visible panel color (dark navy reads as “empty” on the canvas).
+  const coverFill =
+    typeof config.fill === "string" &&
+    config.fill.length > 0 &&
+    config.fill !== "transparent" &&
+    config.fillMode !== "none"
+      ? config.fill
+      : "#1D4ED8";
+  return {
+    ...config,
+    kind: isMaskKind ? kind : revealOn ? (kind === "video_frame" ? "rounded_rectangle" : kind) : "video_frame",
+    radius: isMaskKind ? config.radius : 0,
+    fillMode: revealOn ? "solid" : "none",
+    fill: revealOn ? coverFill : "transparent",
+    material: "broadcast_frame",
+    strokeStyle: config.strokeStyle === "none" ? "solid" : config.strokeStyle,
+    strokeWidth: Math.max(2, config.strokeWidth || 3),
+    strokeColor: config.strokeColor || "#FFFFFF",
+    opacity: 1,
+    uniformCorners: true,
+    cornerRadii: {
+      topLeft: corner,
+      topRight: corner,
+      bottomRight: corner,
+      bottomLeft: corner,
+    },
+    placement: {
+      x: 0,
+      y: 0,
+      width: 1,
+      height: 1,
+    },
+    borderPadding: revealOn
+      ? 0
+      : Math.min(12, Math.max(0, config.borderPadding || 0)),
+    reveal: createDefaultReveal({
+      ...config.reveal,
+      enabled: revealOn,
+    }),
+  };
+}
+
 export function getShapeConfig(object: SceneObject): ShapeComposerConfig {
   const raw = object.metadata?.[SHAPE_METADATA_KEY];
   const kind = isRecord(raw) && typeof raw.kind === "string"
@@ -27,7 +112,7 @@ export function getShapeConfig(object: SceneObject): ShapeComposerConfig {
   const base = createDefaultShapeConfig(kind);
   if (!isRecord(raw)) {
     // Inferred only — Shape Composer stays off until the Enable toggle writes config.
-    return createDefaultShapeConfig(kind, {
+    const inferred = createDefaultShapeConfig(kind, {
       enabled: false,
       fill: typeof object.style.fill === "string" ? object.style.fill : base.fill,
       cornerRadii: {
@@ -43,12 +128,18 @@ export function getShapeConfig(object: SceneObject): ShapeComposerConfig {
       opacity: object.transform.opacity,
       rotation: object.transform.rotation,
     });
+    return isMainVideoContainerObject(object)
+      ? normalizeMainVideoFrameShape(inferred, object)
+      : inferred;
   }
-  return createDefaultShapeConfig(kind, {
+  const config = createDefaultShapeConfig(kind, {
     ...(raw as Partial<ShapeComposerConfig>),
     // Missing enabled on older saves → treat as on.
     enabled: raw.enabled !== false,
   });
+  return isMainVideoContainerObject(object)
+    ? normalizeMainVideoFrameShape(config, object)
+    : config;
 }
 
 export function hasExplicitShapeConfig(object: SceneObject): boolean {
@@ -70,20 +161,40 @@ function layerFillColor(object: SceneObject, fallback: string) {
 
 export function enableShapeComposer(object: SceneObject): SceneObject {
   const current = getShapeConfig(object);
-  const isVideoContainer =
-    object.metadata?.layer === "main_video_container" ||
-    object.metadata?.component_slug === "gnn-001-main-video-container" ||
-    object.name === "Main Video Container";
+  if (hasExplicitShapeConfig(object) && current.enabled && !current.hidden) {
+    return object;
+  }
+  const isVideoContainer = isMainVideoContainerObject(object);
   const reveal = createDefaultReveal({
     ...current.reveal,
+    // Same as other layers: shape intro → exit → reveal video.
     enabled: current.reveal?.enabled !== false,
   });
-  const behaviors =
+  const baseBehaviors =
     current.behaviors.length > 0
       ? current.behaviors
       : reveal.enabled
         ? [defaultRevealEntranceBehavior()]
         : current.behaviors;
+  const behaviors = reveal.enabled
+    ? syncRevealExitBehavior(baseBehaviors, reveal)
+    : baseBehaviors;
+
+  if (isVideoContainer) {
+    return setShapeConfig(
+      object,
+      normalizeMainVideoFrameShape(
+        {
+          ...current,
+          enabled: true,
+          hidden: false,
+          reveal,
+          behaviors,
+        },
+        object,
+      ),
+    );
+  }
 
   return setShapeConfig(object, {
     ...current,
@@ -91,37 +202,17 @@ export function enableShapeComposer(object: SceneObject): SceneObject {
     hidden: false,
     reveal,
     behaviors,
-    // Media / video layers get a frame overlay — never a solid fill wipe.
-    ...(isVideoContainer
-      ? {
-          kind: "video_frame" as const,
-          fillMode: "none" as const,
-          fill: "transparent",
-          strokeWidth: Math.max(3, current.strokeWidth || 0),
-          strokeStyle: "solid" as const,
-          strokeColor: current.strokeColor || "#FFFFFF",
-          material: "broadcast_frame" as const,
-          cornerRadii: {
-            topLeft: Number(object.style.corner_radius ?? 10),
-            topRight: Number(object.style.corner_radius ?? 10),
-            bottomRight: Number(object.style.corner_radius ?? 10),
-            bottomLeft: Number(object.style.corner_radius ?? 10),
-          },
-          uniformCorners: true,
-        }
-      : {
-          strokeStyle:
-            current.strokeStyle === "none" ? "solid" : current.strokeStyle,
-          strokeWidth: Math.max(2, current.strokeWidth || 0),
-          strokeColor: current.strokeColor || "#5B8DEF",
-          fill: layerFillColor(
-            object,
-            !current.fill || current.fill === "transparent"
-              ? "rgba(99,102,241,0.85)"
-              : current.fill,
-          ),
-          fillMode: current.fillMode === "none" ? "solid" : current.fillMode,
-        }),
+    strokeStyle:
+      current.strokeStyle === "none" ? "solid" : current.strokeStyle,
+    strokeWidth: Math.max(2, current.strokeWidth || 0),
+    strokeColor: current.strokeColor || "#5B8DEF",
+    fill: layerFillColor(
+      object,
+      !current.fill || current.fill === "transparent"
+        ? "rgba(99,102,241,0.85)"
+        : current.fill,
+    ),
+    fillMode: current.fillMode === "none" ? "solid" : current.fillMode,
   });
 }
 
@@ -149,20 +240,50 @@ export function areShapesEnabledOnAllLayers(objects: SceneObject[]): boolean {
 }
 
 export function needsShapeComposerSeed(objects: SceneObject[]): boolean {
-  return objects.some(
-    (object) =>
-      !hasExplicitShapeConfig(object) || !getShapeConfig(object).enabled,
-  );
+  // Only fill missing shape config — never strip existing Shape Composer data.
+  return objects.some((object) => !hasExplicitShapeConfig(object));
 }
 
-/** Enable shape on layers that are missing config or still disabled. */
+/**
+ * Enable Shape Composer on layers that do not already have config.
+ * Layers with existing shape metadata (enabled or disabled) are left untouched
+ * so custom Shape Composer work is never overwritten.
+ */
 export function seedShapeComposerOnAllLayers(
   objects: SceneObject[],
 ): SceneObject[] {
   return objects.map((object) => {
-    if (hasExplicitShapeConfig(object) && getShapeConfig(object).enabled) {
+    if (hasExplicitShapeConfig(object)) {
       const raw = object.metadata?.[SHAPE_METADATA_KEY];
-      if (isRecord(raw) && raw.reveal == null) {
+      // Repair / normalize main-video shape config when needed.
+      if (isMainVideoContainerObject(object) && isRecord(raw)) {
+        const kind = typeof raw.kind === "string" ? raw.kind : "";
+        const revealRaw = isRecord(raw.reveal) ? raw.reveal : null;
+        if (
+          revealRaw == null ||
+          kind === "polygon" ||
+          kind === "star" ||
+          kind === "ribbon" ||
+          kind === "speech_bubble"
+        ) {
+          const current = getShapeConfig(object);
+          return setShapeConfig(
+            object,
+            normalizeMainVideoFrameShape(
+              {
+                ...current,
+                reveal: createDefaultReveal({
+                  ...current.reveal,
+                  enabled: revealRaw == null ? true : current.reveal.enabled,
+                }),
+              },
+              object,
+            ),
+          );
+        }
+      }
+      // Backfill reveal defaults only when missing — keep user toggles/behaviors.
+      if (isRecord(raw) && raw.reveal == null && getShapeConfig(object).enabled) {
         return patchShapeConfig(object, {
           reveal: createDefaultReveal({ enabled: true }),
         });
@@ -254,7 +375,42 @@ export function convertShapeKind(
   object: SceneObject,
   kind: ShapeKind,
 ): SceneObject {
+  if (isMainVideoContainerObject(object)) {
+    const allowed = new Set([
+      "video_frame",
+      "border_frame",
+      "rounded_rectangle",
+      "rectangle",
+      "ellipse",
+      "circle",
+      "video_mask",
+      "image_mask",
+    ]);
+    const nextKind = (allowed.has(kind) ? kind : "video_frame") as ShapeKind;
+    const current = getShapeConfig(object);
+    // Normalize may map video_frame → rounded_rectangle when reveal is on.
+    // Bail when the live kind already matches so Select sync cannot rewrite
+    // metadata every render.
+    const preview = normalizeMainVideoFrameShape(
+      {
+        ...current,
+        kind: nextKind,
+        enabled: true,
+      },
+      object,
+    );
+    if (
+      current.enabled &&
+      current.kind === preview.kind &&
+      current.fill === preview.fill &&
+      current.fillMode === preview.fillMode
+    ) {
+      return object;
+    }
+    return setShapeConfig(object, preview);
+  }
   const current = getShapeConfig(object);
+  if (current.kind === kind && current.enabled) return object;
   return setShapeConfig(object, createDefaultShapeConfig(kind, {
     ...current,
     kind,

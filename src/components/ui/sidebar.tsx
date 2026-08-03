@@ -18,11 +18,6 @@ import {
   SheetTitle,
 } from "@/components/ui/sheet"
 import { Skeleton } from "@/components/ui/skeleton"
-import {
-  Tooltip,
-  TooltipContent,
-  TooltipTrigger,
-} from "@/components/ui/tooltip"
 import { PanelLeftIcon } from "lucide-react"
 
 const SIDEBAR_COOKIE_NAME = "sidebar_state"
@@ -507,25 +502,26 @@ function SidebarMenuButton({
 }: useRender.ComponentProps<"button"> &
   React.ComponentProps<"button"> & {
     isActive?: boolean
-    tooltip?: string | React.ComponentProps<typeof TooltipContent>
+    tooltip?: string
   } & VariantProps<typeof sidebarMenuButtonVariants>) {
   const { isMobile, state } = useSidebar()
-  const [tooltipReady, setTooltipReady] = React.useState(false)
 
-  React.useEffect(() => {
-    setTooltipReady(true)
-  }, [])
+  // Do not wrap with Base UI TooltipTrigger — it assigns useId()-based ids that
+  // diverge between SSR and client (hydration mismatch on sidebar nav).
+  // Native title covers the collapsed-icon label safely.
+  const nativeTitle =
+    tooltip && state === "collapsed" && !isMobile ? tooltip : undefined
 
-  const canRenderTooltip = Boolean(tooltip) && tooltipReady
-  const comp = useRender({
+  return useRender({
     defaultTagName: "button",
     props: mergeProps<"button">(
       {
         className: cn(sidebarMenuButtonVariants({ variant, size }), className),
+        title: nativeTitle,
       },
       props
     ),
-    render: !canRenderTooltip ? render : <TooltipTrigger render={render} />,
+    render,
     state: {
       slot: "sidebar-menu-button",
       sidebar: "menu-button",
@@ -533,28 +529,6 @@ function SidebarMenuButton({
       active: isActive,
     },
   })
-
-  if (!canRenderTooltip) {
-    return comp
-  }
-
-  if (typeof tooltip === "string") {
-    tooltip = {
-      children: tooltip,
-    }
-  }
-
-  return (
-    <Tooltip>
-      {comp}
-      <TooltipContent
-        side="right"
-        align="center"
-        hidden={state !== "collapsed" || isMobile}
-        {...tooltip}
-      />
-    </Tooltip>
-  )
 }
 
 function SidebarMenuAction({
@@ -611,10 +585,8 @@ function SidebarMenuSkeleton({
 }: React.ComponentProps<"div"> & {
   showIcon?: boolean
 }) {
-  // Random width between 50 to 90%.
-  const [width] = React.useState(() => {
-    return `${Math.floor(Math.random() * 40) + 50}%`
-  })
+  // Fixed width — Math.random() here caused SSR/client style mismatches.
+  const width = "70%"
 
   return (
     <div

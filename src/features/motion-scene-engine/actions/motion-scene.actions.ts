@@ -13,6 +13,7 @@ import { createMotionSceneService } from "@/features/motion-scene-engine/service
 import type {
   MotionScene,
   MotionSceneWithRelations,
+  SceneVersion,
 } from "@/features/motion-scene-engine/types/motion-scene.types";
 
 export type MotionSceneActionResult<T> =
@@ -192,6 +193,118 @@ export async function listMotionScenesAction(): Promise<
   await ensureMotionSceneDefaultsAction();
   const service = createMotionSceneService(supabase);
   const result = await service.listScenes(membership.organization.id);
+  if (!result.data) return { success: false, error: result.error ?? "List failed" };
+  return { success: true, data: result.data };
+}
+
+const sceneVersionSchema = z.object({
+  sceneId: z.string().uuid(),
+  label: z.string().trim().max(200).optional(),
+});
+
+/** Snapshot current scene into history. Live scene name stays unchanged. */
+export async function saveMotionSceneVersionAction(
+  raw: z.infer<typeof sceneVersionSchema>,
+): Promise<MotionSceneActionResult<MotionSceneWithRelations>> {
+  const parsed = sceneVersionSchema.safeParse(raw);
+  if (!parsed.success) {
+    return {
+      success: false,
+      error: parsed.error.issues[0]?.message ?? "Invalid input",
+    };
+  }
+
+  const { supabase, membership, user, error } = await requireMotionSceneContext();
+  if (!membership) {
+    return { success: false, error: error ?? "Organization required" };
+  }
+
+  const service = createMotionSceneService(supabase);
+  const result = await service.createVersion(
+    parsed.data.sceneId,
+    user.id,
+    { label: parsed.data.label },
+  );
   if (!result.data) return { success: false, error: result.error };
+  revalidatePath(`/creative-studio/scenes/${parsed.data.sceneId}`);
+  revalidatePath("/creative-studio/scenes");
+  return { success: true, data: result.data };
+}
+
+export async function listMotionSceneVersionsAction(
+  sceneId: string,
+): Promise<MotionSceneActionResult<SceneVersion[]>> {
+  const parsed = z.string().uuid().safeParse(sceneId);
+  if (!parsed.success) {
+    return { success: false, error: "Invalid scene id" };
+  }
+
+  const { supabase, membership, error } = await requireMotionSceneContext();
+  if (!membership) {
+    return { success: false, error: error ?? "Organization required" };
+  }
+
+  const service = createMotionSceneService(supabase);
+  const result = await service.listVersions(parsed.data);
+  if (!result.data) return { success: false, error: result.error };
+  return { success: true, data: result.data };
+}
+
+const restoreVersionSchema = z.object({
+  sceneId: z.string().uuid(),
+  versionId: z.string().uuid(),
+});
+
+/** Restore a history snapshot onto the same scene (same id + name). */
+export async function restoreMotionSceneVersionAction(
+  raw: z.infer<typeof restoreVersionSchema>,
+): Promise<MotionSceneActionResult<MotionSceneWithRelations>> {
+  const parsed = restoreVersionSchema.safeParse(raw);
+  if (!parsed.success) {
+    return {
+      success: false,
+      error: parsed.error.issues[0]?.message ?? "Invalid input",
+    };
+  }
+
+  const { supabase, membership, user, error } = await requireMotionSceneContext();
+  if (!membership) {
+    return { success: false, error: error ?? "Organization required" };
+  }
+
+  const service = createMotionSceneService(supabase);
+  const result = await service.restoreVersion(
+    parsed.data.sceneId,
+    parsed.data.versionId,
+    user.id,
+  );
+  if (!result.data) return { success: false, error: result.error };
+
+  // Keep composer object tables in sync with restored document.
+  const { createSceneComposerService, toComposerScene } = await import(
+    "@/features/scene-composer/services/scene-composer.service.impl"
+  );
+  const composerService = createSceneComposerService(supabase);
+  const composerScene = toComposerScene(result.data);
+  const saved = await composerService.saveComposerScene(
+    parsed.data.sceneId,
+    {
+      composer_document: composerScene.composer_document,
+      composer_settings: composerScene.composer_settings,
+      workflow_state: composerScene.workflow_state,
+      frame_rate: composerScene.frame_rate,
+      duration_ms: composerScene.duration_ms,
+      resolved_bindings: composerScene.resolved_bindings,
+      metadata: composerScene.metadata,
+    },
+    user.id,
+    { syncTables: true },
+  );
+  if (!saved.data) {
+    return { success: false, error: saved.error ?? "Restore sync failed" };
+  }
+
+  revalidatePath(`/creative-studio/scenes/${parsed.data.sceneId}`);
+  revalidatePath("/creative-studio/scenes");
   return { success: true, data: result.data };
 }

@@ -5,7 +5,6 @@ import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { requireAuth } from "@/features/auth/guards/require-auth";
 import { createTimelineService } from "@/features/creative-studio/services/timeline.service.impl";
 import { createMotionSceneService } from "@/features/motion-scene-engine/services/motion-scene.service.impl";
-import { ensureComposerDefaultsAction } from "@/features/scene-composer/actions/scene-composer.actions";
 import { SceneComposerWorkspace } from "@/features/scene-composer/components/scene-composer-workspace";
 import { createSceneComposerService } from "@/features/scene-composer/services/scene-composer.service.impl";
 import { resolveActiveMembership } from "@/features/organization/services/resolve-active-membership";
@@ -54,8 +53,7 @@ export default async function MotionSceneComposerPage({
     );
   }
 
-  await ensureComposerDefaultsAction();
-
+  // Defaults seed runs on the library page only — avoid re-seeding on every open.
   const composerService = createSceneComposerService(supabase);
   const motionService = createMotionSceneService(supabase);
   const orgId = membership.organization.id;
@@ -63,7 +61,8 @@ export default async function MotionSceneComposerPage({
   const [sceneResult, scenesResult, categoriesResult, componentsResult] =
     await Promise.all([
       composerService.getComposerScene(sceneId),
-      motionService.listScenes(orgId),
+      // Lightweight list — omit scene_document for sidebar (default).
+      motionService.listScenes(orgId, { lightweight: true }),
       motionService.listCategories(orgId),
       composerService.listComponents(orgId),
     ]);

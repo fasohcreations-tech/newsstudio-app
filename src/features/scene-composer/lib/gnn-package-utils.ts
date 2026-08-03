@@ -37,4 +37,4 @@ export function filterGnnComponents(components: SceneComponent[]): SceneComponen
 }
 
 export const GNN_PACKAGE_LABEL = "GNN Broadcast v1";
-export const GNN_MASTER_SCENE_TARGET = 10;
+export const GNN_MASTER_SCENE_TARGET = 1;

@@ -22,7 +22,13 @@ import * as AIJobManager from "@/features/ai/services/ai-job-manager";
 
 type Client = SupabaseClient<Database>;
 
-const TASK_SELECT = "*";
+const AI_WORKFLOW_SELECT =
+  "id, organization_id, story_id, status, current_stage, estimated_seconds, started_at, finished_at, metadata, error, created_by, updated_by, created_at, updated_at, deleted_at";
+
+const AI_WORKFLOW_TASK_SELECT =
+  "id, organization_id, workflow_id, story_id, task_type, stage, sort_order, status, provider, model, ai_job_id, input, output, output_version, estimated_seconds, error, started_at, finished_at, approved_at, approved_by, rejected_at, rejected_by, rejection_reason, created_by, updated_by, created_at, updated_at, deleted_at";
+
+const TASK_SELECT = AI_WORKFLOW_TASK_SELECT;
 
 /**
  * AI Workflow Manager — Story → production pipeline orchestration.
@@ -34,7 +40,7 @@ export async function getLatestWorkflowForStory(
 ): Promise<AIProductionServiceResult<AIWorkflowWithTasks | null>> {
   const { data: workflow, error } = await client
     .from("ai_workflows")
-    .select("*")
+    .select(AI_WORKFLOW_SELECT)
     .eq("story_id", storyId)
     .is("deleted_at", null)
     .order("created_at", { ascending: false })
@@ -118,7 +124,7 @@ export async function startProductionWorkflow(
       created_by: args.userId,
       updated_by: args.userId,
     })
-    .select("*")
+    .select(AI_WORKFLOW_SELECT)
     .single();
 
   if (wfError || !workflow) {
@@ -388,7 +394,7 @@ export async function approveTask(
     })
     .eq("id", args.taskId)
     .eq("status", "waiting_for_approval")
-    .select("*")
+    .select(AI_WORKFLOW_TASK_SELECT)
     .single();
 
   if (approveError || !approved) {
@@ -427,7 +433,7 @@ export async function rejectTask(
     })
     .eq("id", args.taskId)
     .eq("status", "waiting_for_approval")
-    .select("*")
+    .select(AI_WORKFLOW_TASK_SELECT)
     .single();
 
   if (rejectError || !rejected) {
@@ -484,7 +490,7 @@ export async function updateTaskOutput(
       updated_by: args.userId,
     })
     .eq("id", args.taskId)
-    .select("*")
+    .select(AI_WORKFLOW_TASK_SELECT)
     .single();
 
   if (error) return { data: null, error: error.message };
@@ -635,7 +641,7 @@ async function getTask(
 ): Promise<AIProductionServiceResult<AIWorkflowTask>> {
   const { data, error } = await client
     .from("ai_workflow_tasks")
-    .select("*")
+    .select(AI_WORKFLOW_TASK_SELECT)
     .eq("id", taskId)
     .is("deleted_at", null)
     .maybeSingle();
@@ -656,7 +662,7 @@ async function loadWorkflowBundle(
 > {
   const { data: workflow, error } = await client
     .from("ai_workflows")
-    .select("*")
+    .select(AI_WORKFLOW_SELECT)
     .eq("id", workflowId)
     .is("deleted_at", null)
     .maybeSingle();
@@ -666,7 +672,7 @@ async function loadWorkflowBundle(
 
   const { data: tasks, error: tasksError } = await client
     .from("ai_workflow_tasks")
-    .select("*")
+    .select(AI_WORKFLOW_TASK_SELECT)
     .eq("workflow_id", workflowId)
     .is("deleted_at", null)
     .order("sort_order", { ascending: true });

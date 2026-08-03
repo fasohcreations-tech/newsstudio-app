@@ -114,7 +114,10 @@ export function LayerEffectsPanel({
             Stackable broadcast effects · {stack.effects.length} on this layer
           </p>
         </div>
+        {/* Uncontrolled action menu — value={null}+reset re-fired on sync and
+            caused Maximum update depth exceeded. Remount clears the label. */}
         <Select
+          key={`add-fx-${stack.effects.length}`}
           onValueChange={(value) => {
             if (!value) return;
             commit(addEffect(stack, value as BroadcastEffectType));

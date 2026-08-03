@@ -54,29 +54,33 @@ export function VideoFrame({
       }}
     >
       {/* Thin silver inner highlight */}
-      <div
-        aria-hidden
-        style={{
-          position: "absolute",
-          inset: Math.max(1, borderWidth),
-          borderRadius: Math.max(0, cornerRadius - borderWidth),
-          border: "1px solid rgba(210, 220, 235, 0.22)",
-          pointerEvents: "none",
-          zIndex: 6,
-        }}
-      />
+      {borderWidth > 0 ? (
+        <div
+          aria-hidden
+          style={{
+            position: "absolute",
+            inset: Math.max(1, borderWidth),
+            borderRadius: Math.max(0, cornerRadius - borderWidth),
+            border: "1px solid rgba(210, 220, 235, 0.22)",
+            pointerEvents: "none",
+            zIndex: 6,
+          }}
+        />
+      ) : null}
       {/* Soft glass wash */}
-      <div
-        aria-hidden
-        style={{
-          position: "absolute",
-          inset: 0,
-          borderRadius: cornerRadius,
-          background: `linear-gradient(180deg, rgba(255,255,255,${glassOpacity * 0.8}) 0%, transparent 28%, rgba(0,0,0,${glassOpacity}) 100%)`,
-          pointerEvents: "none",
-          zIndex: 5,
-        }}
-      />
+      {glassOpacity > 0.001 ? (
+        <div
+          aria-hidden
+          style={{
+            position: "absolute",
+            inset: 0,
+            borderRadius: cornerRadius,
+            background: `linear-gradient(180deg, rgba(255,255,255,${glassOpacity * 0.8}) 0%, transparent 28%, rgba(0,0,0,${glassOpacity}) 100%)`,
+            pointerEvents: "none",
+            zIndex: 5,
+          }}
+        />
+      ) : null}
       {children}
     </div>
   );

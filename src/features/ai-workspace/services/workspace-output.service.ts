@@ -4,6 +4,7 @@ import type { Database, Json } from "@/shared/types/database.types";
 import type { AIWorkspaceSuggestedAction } from "@/features/ai-workspace/constants/workspace.constants";
 import { runMockWorkspaceAction } from "@/features/ai-workspace/services/mock-assistant";
 import * as AIJobManager from "@/features/ai/services/ai-job-manager";
+import { AI_JOB_SELECT } from "@/features/content/services/ai-job.service";
 import type {
   AIWorkspaceOutput,
   AIWorkspaceServiceResult,
@@ -12,13 +13,16 @@ import type {
 
 type Client = SupabaseClient<Database>;
 
+const AI_WORKSPACE_OUTPUT_SELECT =
+  "id, organization_id, story_id, conversation_id, message_id, action_type, status, title, content, content_version, ai_job_id, structured, error, approved_at, approved_by, rejected_at, rejected_by, rejection_reason, created_by, updated_by, created_at, updated_at, deleted_at";
+
 export async function listOutputsForStory(
   client: Client,
   storyId: string,
 ): Promise<AIWorkspaceServiceResult<AIWorkspaceOutput[]>> {
   const { data, error } = await client
     .from("ai_workspace_outputs")
-    .select("*")
+    .select(AI_WORKSPACE_OUTPUT_SELECT)
     .eq("story_id", storyId)
     .is("deleted_at", null)
     .order("created_at", { ascending: false });
@@ -44,7 +48,7 @@ export async function approveOutput(
     })
     .eq("id", args.outputId)
     .eq("status", "waiting_for_approval")
-    .select("*")
+    .select(AI_WORKSPACE_OUTPUT_SELECT)
     .single();
 
   if (error || !data) {
@@ -71,7 +75,7 @@ export async function rejectOutput(
     })
     .eq("id", args.outputId)
     .eq("status", "waiting_for_approval")
-    .select("*")
+    .select(AI_WORKSPACE_OUTPUT_SELECT)
     .single();
 
   if (error || !data) {
@@ -94,7 +98,7 @@ export async function updateOutputContent(
 ): Promise<AIWorkspaceServiceResult<AIWorkspaceOutput>> {
   const { data: current, error: loadError } = await client
     .from("ai_workspace_outputs")
-    .select("*")
+    .select(AI_WORKSPACE_OUTPUT_SELECT)
     .eq("id", args.outputId)
     .is("deleted_at", null)
     .maybeSingle();
@@ -112,7 +116,7 @@ export async function updateOutputContent(
       updated_by: args.userId,
     })
     .eq("id", args.outputId)
-    .select("*")
+    .select(AI_WORKSPACE_OUTPUT_SELECT)
     .single();
 
   if (error || !data) {
@@ -131,7 +135,7 @@ export async function regenerateOutput(
 ): Promise<AIWorkspaceServiceResult<AIWorkspaceOutput>> {
   const { data: current, error: loadError } = await client
     .from("ai_workspace_outputs")
-    .select("*")
+    .select(AI_WORKSPACE_OUTPUT_SELECT)
     .eq("id", args.outputId)
     .is("deleted_at", null)
     .maybeSingle();
@@ -211,7 +215,7 @@ export async function regenerateOutput(
         error: null,
       })
       .eq("id", args.outputId)
-      .select("*")
+      .select(AI_WORKSPACE_OUTPUT_SELECT)
       .single();
 
     if (error || !data) {
@@ -261,7 +265,7 @@ export async function listJobsForStory(
 ): Promise<AIWorkspaceServiceResult<Database["public"]["Tables"]["ai_jobs"]["Row"][]>> {
   const { data, error } = await client
     .from("ai_jobs")
-    .select("*")
+    .select(AI_JOB_SELECT)
     .eq("story_id", storyId)
     .order("created_at", { ascending: false })
     .limit(limit);

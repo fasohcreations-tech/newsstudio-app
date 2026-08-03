@@ -12,6 +12,9 @@ import type {
 
 type Client = SupabaseClient<Database>;
 
+const RENDER_JOB_SELECT =
+  "id, organization_id, story_id, content_object_id, renderer, status, progress, output_path, started_at, finished_at, error, created_by, updated_by, created_at, updated_at";
+
 /**
  * RenderService — ledger access for render / encode jobs.
  * No renderer adapters or progress workers in this sprint.
@@ -23,7 +26,7 @@ export async function listRenderJobs(
 ): Promise<ContentServiceResult<RenderJob[]>> {
   let query = client
     .from("render_jobs")
-    .select("*")
+    .select(RENDER_JOB_SELECT)
     .eq("organization_id", scope.organizationId)
     .eq("story_id", scope.storyId)
     .order("created_at", { ascending: false });
@@ -45,7 +48,7 @@ export async function getRenderJob(
 ): Promise<ContentServiceResult<RenderJob>> {
   const { data, error } = await client
     .from("render_jobs")
-    .select("*")
+    .select(RENDER_JOB_SELECT)
     .eq("id", id)
     .maybeSingle();
 
@@ -61,7 +64,7 @@ export async function createRenderJob(
   const { data, error } = await client
     .from("render_jobs")
     .insert(input)
-    .select("*")
+    .select(RENDER_JOB_SELECT)
     .single();
 
   if (error) return { data: null, error: error.message };
@@ -77,7 +80,7 @@ export async function updateRenderJob(
     .from("render_jobs")
     .update(patch)
     .eq("id", id)
-    .select("*")
+    .select(RENDER_JOB_SELECT)
     .single();
 
   if (error) return { data: null, error: error.message };

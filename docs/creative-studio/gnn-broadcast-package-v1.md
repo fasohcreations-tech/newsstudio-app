@@ -9,17 +9,8 @@ It ships as JSON-first scene/component defaults (no static PNG templates, no ras
 - Master design system (typography, palette, spacing, motion language, visual tokens)
 - Component library (background, header, footer, headline, video, image, logo, ticker, clock, date, reporter, quote, verse, statistics, animation)
 - Motion preset library (fade/slide/reveal/zoom/push/typewriter/blur/elastic/bounce/mask reveal)
-- 10 master scenes:
-  - `GNN-001` Standard News Story
-  - `GNN-002` Breaking News
-  - `GNN-003` Headlines
-  - `GNN-004` Live Reporter
-  - `GNN-005` Interview
-  - `GNN-006` Scripture
-  - `GNN-007` Quote Card
-  - `GNN-008` Statistics
-  - `GNN-009` Timeline
-  - `GNN-010` Outro
+- 1 master scene:
+  - `GNN-001` Full News Story (active working template)
 
 ## Implementation map
 

@@ -12,6 +12,9 @@ import type {
 
 type Client = SupabaseClient<Database>;
 
+export const AI_JOB_SELECT =
+  "id, organization_id, story_id, content_object_id, provider, model, job_type, status, request, response, tokens_used, cost, processing_time_ms, error, created_by, updated_by, created_at, updated_at";
+
 /**
  * AIJobService — ledger access for AI jobs.
  * No provider calls, token metering, or orchestration in this sprint.
@@ -23,7 +26,7 @@ export async function listAiJobs(
 ): Promise<ContentServiceResult<AiJob[]>> {
   let query = client
     .from("ai_jobs")
-    .select("*")
+    .select(AI_JOB_SELECT)
     .eq("organization_id", scope.organizationId)
     .eq("story_id", scope.storyId)
     .order("created_at", { ascending: false });
@@ -46,7 +49,7 @@ export async function getAiJob(
 ): Promise<ContentServiceResult<AiJob>> {
   const { data, error } = await client
     .from("ai_jobs")
-    .select("*")
+    .select(AI_JOB_SELECT)
     .eq("id", id)
     .maybeSingle();
 
@@ -62,7 +65,7 @@ export async function createAiJob(
   const { data, error } = await client
     .from("ai_jobs")
     .insert(input)
-    .select("*")
+    .select(AI_JOB_SELECT)
     .single();
 
   if (error) return { data: null, error: error.message };
@@ -78,7 +81,7 @@ export async function updateAiJob(
     .from("ai_jobs")
     .update(patch)
     .eq("id", id)
-    .select("*")
+    .select(AI_JOB_SELECT)
     .single();
 
   if (error) return { data: null, error: error.message };

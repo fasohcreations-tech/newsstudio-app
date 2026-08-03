@@ -65,6 +65,10 @@ const saveSchema = z.object({
   composer_document: z.record(z.string(), z.unknown()),
   resolved_bindings: z.record(z.string(), z.string()).optional(),
   metadata: z.record(z.string(), z.unknown()).optional(),
+  /** When false, skip Next revalidation (autosave). Default true for explicit saves. */
+  revalidate: z.boolean().optional(),
+  /** When true, upsert normalized object/binding/keyframe tables (checkpoint only). */
+  syncTables: z.boolean().optional(),
 });
 
 export async function saveComposerSceneAction(
@@ -97,10 +101,21 @@ export async function saveComposerSceneAction(
       metadata: parsed.data.metadata,
     },
     user.id,
+    {
+      // Autosave writes scene_document only; checkpoint syncs relational tables.
+      syncTables: parsed.data.syncTables === true,
+    },
   );
 
   if (!result.data) return { success: false, error: result.error };
-  revalidatePath(`/creative-studio/scenes/${parsed.data.sceneId}`);
+
+  // Autosave must not revalidate — that refreshes server props, re-seeds the
+  // client document, and schedules another autosave (infinite update loop).
+  if (parsed.data.revalidate !== false) {
+    revalidatePath(`/creative-studio/scenes/${parsed.data.sceneId}`);
+    revalidatePath("/creative-studio/scenes");
+  }
+
   return { success: true, data: result.data };
 }
 
@@ -140,7 +155,7 @@ export async function listComposerComponentsAction(): Promise<
     return { success: false, error: error ?? "Organization required" };
   }
 
-  await ensureComposerDefaultsAction();
+  // Defaults are seeded on the scenes library page — do not re-seed on every list.
   const service = createSceneComposerService(supabase);
   const result = await service.listComponents(membership.organization.id);
   if (!result.data) return { success: false, error: result.error };

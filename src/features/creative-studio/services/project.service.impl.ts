@@ -26,12 +26,45 @@ import type {
 
 type Client = SupabaseClient;
 
+/** Base Creative Studio columns (migration 000013). */
+const CREATIVE_PROJECT_SELECT =
+  "id, organization_id, story_id, title, description, status, frame_rate, resolution_width, resolution_height, duration_ms, thumbnail_url, settings, metadata, created_by, updated_by, created_at, updated_at, deleted_at";
+
+const CREATIVE_TIMELINE_SELECT_BASE =
+  "id, organization_id, project_id, title, duration_ms, zoom_level, snap_enabled, playhead_ms, metadata, created_at, updated_at";
+
+/** Includes Module 3.1 timeline engine columns (migration 000014). */
+const CREATIVE_TIMELINE_SELECT =
+  `${CREATIVE_TIMELINE_SELECT_BASE}, story_id, scene_id, content_object_id, voice_segment_id, script_paragraph_id, magnetic_enabled, ripple_mode`;
+
+const CREATIVE_TRACK_SELECT_BASE =
+  "id, organization_id, timeline_id, kind, name, sort_order, muted, locked, height, color, metadata, created_at, updated_at";
+
+const CREATIVE_TRACK_SELECT =
+  `${CREATIVE_TRACK_SELECT_BASE}, collapsed, visible, solo, color_label`;
+
+const CREATIVE_CLIP_SELECT_BASE =
+  "id, organization_id, track_id, media_asset_id, template_id, name, clip_kind, start_ms, end_ms, trim_start_ms, trim_end_ms, position_x, position_y, scale, rotation, opacity, volume, speed, sort_order, metadata, created_at, updated_at, deleted_at";
+
+const CREATIVE_CLIP_SELECT =
+  `${CREATIVE_CLIP_SELECT_BASE}, locked, muted, hidden, color_label, content_object_id, scene_id, voice_segment_id, script_paragraph_id, source_clip_id`;
+
 function ok<T>(data: T): CreativeServiceResult<T> {
   return { data, error: null };
 }
 
 function fail<T>(error: string): CreativeServiceResult<T> {
   return { data: null, error };
+}
+
+function isMissingColumnError(message: string | undefined): boolean {
+  if (!message) return false;
+  const lower = message.toLowerCase();
+  return (
+    lower.includes("does not exist") ||
+    (lower.includes("column") && lower.includes("not find")) ||
+    lower.includes("could not find")
+  );
 }
 
 export class SupabaseProjectService implements ProjectService {
@@ -43,7 +76,7 @@ export class SupabaseProjectService implements ProjectService {
   ): Promise<CreativeServiceResult<CreativeProject[]>> {
     let query = this.client
       .from("creative_studio_projects")
-      .select("*")
+      .select(CREATIVE_PROJECT_SELECT)
       .eq("organization_id", organizationId)
       .order("updated_at", { ascending: false });
 
@@ -63,7 +96,7 @@ export class SupabaseProjectService implements ProjectService {
   async get(projectId: string): Promise<CreativeServiceResult<CreativeProject>> {
     const { data, error } = await this.client
       .from("creative_studio_projects")
-      .select("*")
+      .select(CREATIVE_PROJECT_SELECT)
       .eq("id", projectId)
       .is("deleted_at", null)
       .maybeSingle();
@@ -79,11 +112,22 @@ export class SupabaseProjectService implements ProjectService {
     const projectResult = await this.get(projectId);
     if (!projectResult.data) return fail(projectResult.error ?? "Not found");
 
-    const { data: timeline, error: tlError } = await this.client
+    let timelineSelect = CREATIVE_TIMELINE_SELECT;
+    let { data: timeline, error: tlError } = await this.client
       .from("creative_studio_timelines")
-      .select("*")
+      .select(timelineSelect)
       .eq("project_id", projectId)
       .maybeSingle();
+
+    // Fallback when Module 3.1 columns are not applied yet.
+    if (tlError && isMissingColumnError(tlError.message)) {
+      timelineSelect = CREATIVE_TIMELINE_SELECT_BASE;
+      ({ data: timeline, error: tlError } = await this.client
+        .from("creative_studio_timelines")
+        .select(timelineSelect)
+        .eq("project_id", projectId)
+        .maybeSingle());
+    }
 
     if (tlError) return fail(tlError.message);
     if (!timeline) {
@@ -94,11 +138,21 @@ export class SupabaseProjectService implements ProjectService {
       });
     }
 
-    const { data: tracks, error: trackError } = await this.client
+    let trackSelect = CREATIVE_TRACK_SELECT;
+    let { data: tracks, error: trackError } = await this.client
       .from("creative_studio_timeline_tracks")
-      .select("*")
+      .select(trackSelect)
       .eq("timeline_id", timeline.id)
       .order("sort_order", { ascending: true });
+
+    if (trackError && isMissingColumnError(trackError.message)) {
+      trackSelect = CREATIVE_TRACK_SELECT_BASE;
+      ({ data: tracks, error: trackError } = await this.client
+        .from("creative_studio_timeline_tracks")
+        .select(trackSelect)
+        .eq("timeline_id", timeline.id)
+        .order("sort_order", { ascending: true }));
+    }
 
     if (trackError) return fail(trackError.message);
 
@@ -107,12 +161,23 @@ export class SupabaseProjectService implements ProjectService {
     let clips: CreativeTimelineClip[] = [];
 
     if (trackIds.length > 0) {
-      const { data: clipRows, error: clipError } = await this.client
+      let clipSelect = CREATIVE_CLIP_SELECT;
+      let { data: clipRows, error: clipError } = await this.client
         .from("creative_studio_timeline_clips")
-        .select("*")
+        .select(clipSelect)
         .in("track_id", trackIds)
         .is("deleted_at", null)
         .order("start_ms", { ascending: true });
+
+      if (clipError && isMissingColumnError(clipError.message)) {
+        clipSelect = CREATIVE_CLIP_SELECT_BASE;
+        ({ data: clipRows, error: clipError } = await this.client
+          .from("creative_studio_timeline_clips")
+          .select(clipSelect)
+          .in("track_id", trackIds)
+          .is("deleted_at", null)
+          .order("start_ms", { ascending: true }));
+      }
 
       if (clipError) return fail(clipError.message);
       clips = (clipRows ?? []) as CreativeTimelineClip[];
@@ -146,7 +211,7 @@ export class SupabaseProjectService implements ProjectService {
         created_by: input.userId,
         updated_by: input.userId,
       })
-      .select("*")
+      .select(CREATIVE_PROJECT_SELECT)
       .single();
 
     if (error || !project) return fail(error?.message ?? "Create failed");
@@ -159,7 +224,7 @@ export class SupabaseProjectService implements ProjectService {
         title: "Main Timeline",
         duration_ms: DEFAULT_TIMELINE_DURATION_MS,
       })
-      .select("*")
+      .select(CREATIVE_TIMELINE_SELECT)
       .single();
 
     if (!timelineInsert.error && timelineInsert.data) {
@@ -189,7 +254,7 @@ export class SupabaseProjectService implements ProjectService {
       .update({ ...patch, updated_by: userId })
       .eq("id", projectId)
       .is("deleted_at", null)
-      .select("*")
+      .select(CREATIVE_PROJECT_SELECT)
       .single();
 
     if (error || !data) return fail(error?.message ?? "Update failed");

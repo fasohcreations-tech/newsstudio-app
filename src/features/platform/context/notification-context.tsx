@@ -63,7 +63,8 @@ const SEED: AppNotification[] = [
     kind: "success",
     title: "MediaOS ready",
     body: "Newsroom operating system is online.",
-    createdAt: new Date().toISOString(),
+    // Fixed ISO — live Date() at module load differs SSR vs client.
+    createdAt: "2026-01-01T00:00:00.000Z",
     read: false,
   },
   {
@@ -71,7 +72,7 @@ const SEED: AppNotification[] = [
     kind: "job",
     title: "Background jobs idle",
     body: "Upload, render, and publish queues are placeholders.",
-    createdAt: new Date().toISOString(),
+    createdAt: "2026-01-01T00:00:00.000Z",
     read: false,
   },
   {
@@ -79,7 +80,7 @@ const SEED: AppNotification[] = [
     kind: "ai",
     title: "AI jobs placeholder",
     body: "Future AI job notifications will appear here.",
-    createdAt: new Date().toISOString(),
+    createdAt: "2026-01-01T00:00:00.000Z",
     read: true,
   },
 ];

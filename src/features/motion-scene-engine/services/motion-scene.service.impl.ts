@@ -17,7 +17,9 @@ import type {
   MotionSceneWithRelations,
   PlaceOnTimelineInput,
   SceneCategory,
+  SceneVersion,
 } from "@/features/motion-scene-engine/types/motion-scene.types";
+import { withQueryLog } from "@/shared/lib/supabase/query-log";
 
 type Client = SupabaseClient;
 
@@ -45,14 +47,53 @@ export class SupabaseMotionSceneService {
     sceneType?: MotionSceneType;
     search?: string;
     favoritesOnly?: boolean;
+    /** When true, omit heavy JSON (scene_document / timeline). Default true. */
+    lightweight?: boolean;
+    /** Max rows (library pagination). Default 100. */
+    limit?: number;
+    /** Offset for pagination. Default 0. */
+    offset?: number;
   }) {
+    const lightweight = filters?.lightweight !== false;
+    const limit = Math.min(Math.max(filters?.limit ?? 100, 1), 500);
+    const offset = Math.max(filters?.offset ?? 0, 0);
+    // Library / sidebars never need full scene_document — that was a major egress source.
+    const columns = lightweight
+      ? [
+          "id",
+          "organization_id",
+          "category_id",
+          "project_id",
+          "brand_kit_id",
+          "parent_scene_id",
+          "scene_type",
+          "name",
+          "description",
+          "aspect_format",
+          "theme_mode",
+          "duration_ms",
+          "canvas",
+          "properties",
+          "preview",
+          "metadata",
+          "is_template",
+          "is_favorite",
+          "version",
+          "created_at",
+          "updated_at",
+          "created_by",
+          "updated_by",
+        ].join(",")
+      : "*";
+
     let query = this.db()
       .from("creative_studio_motion_scenes")
-      .select("*")
+      .select(columns)
       .eq("organization_id", organizationId)
       .eq("is_template", true)
       .is("deleted_at", null)
-      .order("updated_at", { ascending: false });
+      .order("updated_at", { ascending: false })
+      .range(offset, offset + limit - 1);
 
     if (filters?.categoryId) query = query.eq("category_id", filters.categoryId);
     if (filters?.sceneType) query = query.eq("scene_type", filters.sceneType);
@@ -61,18 +102,49 @@ export class SupabaseMotionSceneService {
       query = query.ilike("name", `%${filters.search.trim()}%`);
     }
 
-    const { data, error } = await query;
+    const { data, error } = await withQueryLog(
+      `listScenes:${organizationId}:${lightweight ? "light" : "full"}`,
+      async () => await query,
+      {
+        rowCount: (r) => (Array.isArray(r.data) ? r.data.length : 0),
+        payload: (r) => r.data,
+      },
+    );
     if (error) return fail<MotionScene[]>(error.message);
-    return ok((data ?? []).map((row) => asScene(row as Record<string, unknown>)));
+    return ok(
+      (data ?? []).map((row) => {
+        const scene = asScene(row as unknown as Record<string, unknown>);
+        // Lightweight rows omit scene_document — provide an empty stub so callers
+        // that read .layers do not throw. Layer count lives in metadata.layer_count.
+        if (lightweight && scene.scene_document == null) {
+          scene.scene_document = {
+            version: "1.0",
+            layers: [],
+            placeholders: [],
+            variables: [],
+            animations: [],
+          };
+        }
+        return scene;
+      }),
+    );
   }
 
   async getScene(sceneId: string) {
-    const { data, error } = await this.db()
-      .from("creative_studio_motion_scenes")
-      .select("*")
-      .eq("id", sceneId)
-      .is("deleted_at", null)
-      .maybeSingle();
+    const { data, error } = await withQueryLog(
+      `getScene:${sceneId}`,
+      async () =>
+        await this.db()
+          .from("creative_studio_motion_scenes")
+          .select("*")
+          .eq("id", sceneId)
+          .is("deleted_at", null)
+          .maybeSingle(),
+      {
+        rowCount: (r) => (r.data ? 1 : 0),
+        payload: (r) => r.data,
+      },
+    );
 
     if (error) return fail<MotionSceneWithRelations>(error.message);
     if (!data) return fail<MotionSceneWithRelations>("Motion scene not found");
@@ -126,29 +198,72 @@ export class SupabaseMotionSceneService {
 
     const scene = asScene(data as Record<string, unknown>);
     await this.syncNormalizedTables(organizationId, scene);
-    return this.getScene(scene.id);
+    // Insert already returned the row — avoid a second full-document download.
+    return ok(toMotionSceneWithRelations(scene));
   }
 
   async updateScene(
     sceneId: string,
     patch: Partial<MotionScene>,
     userId: string,
+    options?: { syncNormalized?: boolean; refetch?: boolean },
   ) {
+    const syncNormalized = options?.syncNormalized !== false;
+    const refetch = options?.refetch !== false;
+
+    // When not refetching, omit scene_document / timeline from the response body
+    // — returning the JSON we just wrote doubles autosave egress.
+    const returning = refetch
+      ? "*"
+      : [
+          "id",
+          "organization_id",
+          "category_id",
+          "project_id",
+          "brand_kit_id",
+          "parent_scene_id",
+          "scene_type",
+          "name",
+          "description",
+          "aspect_format",
+          "theme_mode",
+          "duration_ms",
+          "canvas",
+          "properties",
+          "preview",
+          "metadata",
+          "resolved_bindings",
+          "is_template",
+          "is_favorite",
+          "version",
+          "created_at",
+          "updated_at",
+          "created_by",
+          "updated_by",
+        ].join(",");
+
     const { data, error } = await this.db()
       .from("creative_studio_motion_scenes")
       .update({ ...patch, updated_by: userId })
       .eq("id", sceneId)
       .is("deleted_at", null)
-      .select("*")
+      .select(returning)
       .single();
 
     if (error || !data) {
       return fail<MotionSceneWithRelations>(error?.message ?? "Update failed");
     }
 
-    const scene = asScene(data as Record<string, unknown>);
+    const scene = asScene(data as unknown as Record<string, unknown>);
     if (patch.scene_document) {
+      scene.scene_document = patch.scene_document;
+    }
+    if (syncNormalized && patch.scene_document) {
       await this.syncNormalizedTables(scene.organization_id, scene);
+    }
+    // Avoid a second full-document download after every save/autosave.
+    if (!refetch) {
+      return ok(toMotionSceneWithRelations(scene));
     }
     return this.getScene(scene.id);
   }
@@ -194,25 +309,117 @@ export class SupabaseMotionSceneService {
     return this.getScene(scene.id);
   }
 
-  async createVersion(sceneId: string, userId: string) {
+  /**
+   * Snapshot the current scene document into history and bump version.
+   * Keeps the live scene name stable (one scene = one named file).
+   */
+  async createVersion(
+    sceneId: string,
+    userId: string,
+    options?: { label?: string },
+  ) {
     const source = await this.getScene(sceneId);
-    if (!source.data) return fail<MotionSceneWithRelations>(source.error ?? "Not found");
+    if (!source.data) {
+      return fail<MotionSceneWithRelations>(source.error ?? "Not found");
+    }
 
     const src = source.data;
     const nextVersion = src.version + 1;
+    const label =
+      options?.label?.trim() ||
+      `Version ${nextVersion}`;
 
-    await this.db().from("creative_studio_scene_versions").insert({
-      organization_id: src.organization_id,
-      scene_id: src.id,
-      version_number: nextVersion,
-      name: `${src.name} v${nextVersion}`,
-      scene_snapshot: src.scene_document as unknown as Record<string, unknown>,
-      created_by: userId,
+    const { error: insertError } = await this.db()
+      .from("creative_studio_scene_versions")
+      .insert({
+        organization_id: src.organization_id,
+        scene_id: src.id,
+        version_number: nextVersion,
+        name: label,
+        scene_snapshot: src.scene_document as unknown as Record<string, unknown>,
+        created_by: userId,
+      });
+
+    if (insertError) {
+      return fail<MotionSceneWithRelations>(insertError.message);
+    }
+
+    // Bump version counter only — never rename the live scene.
+    return this.updateScene(sceneId, { version: nextVersion }, userId);
+  }
+
+  async listVersions(sceneId: string) {
+    const { data, error } = await this.db()
+      .from("creative_studio_scene_versions")
+      .select(
+        "id, organization_id, scene_id, version_number, name, created_by, created_at",
+      )
+      .eq("scene_id", sceneId)
+      .order("version_number", { ascending: false });
+
+    if (error) return fail<SceneVersion[]>(error.message);
+    return ok(
+      (data ?? []).map((row) => ({
+        ...(row as Omit<SceneVersion, "scene_snapshot">),
+        scene_snapshot: {},
+      })),
+    );
+  }
+
+  async getVersion(versionId: string) {
+    const { data, error } = await this.db()
+      .from("creative_studio_scene_versions")
+      .select("*")
+      .eq("id", versionId)
+      .maybeSingle();
+
+    if (error) return fail<SceneVersion>(error.message);
+    if (!data) return fail<SceneVersion>("Version not found");
+    return ok(data as SceneVersion);
+  }
+
+  /**
+   * Restore a history snapshot onto the same scene record (same id + name).
+   * Saves a safety checkpoint of the current live state first.
+   */
+  async restoreVersion(sceneId: string, versionId: string, userId: string) {
+    const versionResult = await this.getVersion(versionId);
+    if (!versionResult.data) {
+      return fail<MotionSceneWithRelations>(
+        versionResult.error ?? "Version not found",
+      );
+    }
+    const version = versionResult.data;
+    if (version.scene_id !== sceneId) {
+      return fail<MotionSceneWithRelations>("Version does not belong to this scene");
+    }
+
+    const safety = await this.createVersion(sceneId, userId, {
+      label: `Before restore · v${version.version_number}`,
     });
+    if (!safety.data) {
+      return fail<MotionSceneWithRelations>(
+        safety.error ?? "Could not checkpoint current scene",
+      );
+    }
+
+    const snapshot = version.scene_snapshot as unknown as MotionScene["scene_document"];
+    // Ensure layers array exists for normalized sync after restore.
+    const document: MotionScene["scene_document"] = {
+      ...snapshot,
+      layers: Array.isArray(snapshot.layers) ? snapshot.layers : [],
+      placeholders: Array.isArray(snapshot.placeholders)
+        ? snapshot.placeholders
+        : [],
+      variables: Array.isArray(snapshot.variables) ? snapshot.variables : [],
+      animations: Array.isArray(snapshot.animations) ? snapshot.animations : [],
+    };
 
     return this.updateScene(
       sceneId,
-      { version: nextVersion, name: `${src.name} v${nextVersion}` },
+      {
+        scene_document: document,
+      },
       userId,
     );
   }
@@ -350,7 +557,9 @@ export class SupabaseMotionSceneService {
   async listCategories(organizationId: string) {
     const { data, error } = await this.db()
       .from("creative_studio_scene_categories")
-      .select("*")
+      .select(
+        "id, organization_id, name, slug, description, icon, sort_order, metadata, created_at, updated_at",
+      )
       .eq("organization_id", organizationId)
       .order("sort_order", { ascending: true });
 
@@ -361,7 +570,9 @@ export class SupabaseMotionSceneService {
   async listAnimationPresets(organizationId: string) {
     const { data, error } = await this.db()
       .from("creative_studio_animation_presets")
-      .select("*")
+      .select(
+        "id, organization_id, name, kind, duration_ms, config, is_system, metadata, created_at, updated_at",
+      )
       .eq("organization_id", organizationId)
       .order("name", { ascending: true });
 

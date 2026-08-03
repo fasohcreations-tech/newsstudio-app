@@ -16,6 +16,9 @@ import { createTimelineService } from "@/features/creative-studio/services/timel
 
 type Client = SupabaseClient;
 
+const CREATIVE_CLIP_SELECT =
+  "id, organization_id, track_id, media_asset_id, template_id, name, clip_kind, start_ms, end_ms, trim_start_ms, trim_end_ms, position_x, position_y, scale, rotation, opacity, volume, speed, sort_order, metadata, created_at, updated_at, deleted_at, locked, muted, hidden, color_label, content_object_id, scene_id, voice_segment_id, script_paragraph_id, source_clip_id";
+
 function ok<T>(data: T): CreativeServiceResult<T> {
   return { data, error: null };
 }
@@ -77,7 +80,7 @@ export class SupabaseClipService implements ClipService {
         .from("creative_studio_timeline_clips")
         .update({ color_label: input.colorLabel })
         .eq("id", result.data.id)
-        .select("*")
+        .select(CREATIVE_CLIP_SELECT)
         .single();
       if (data) {
         return ok(asEnterpriseClip(data as Record<string, unknown>));
@@ -135,7 +138,7 @@ export class SupabaseClipService implements ClipService {
   ): Promise<CreativeServiceResult<EnterpriseTimelineClip[]>> {
     const { data: clip, error } = await this.client
       .from("creative_studio_timeline_clips")
-      .select("*")
+      .select(CREATIVE_CLIP_SELECT)
       .eq("id", clipId)
       .is("deleted_at", null)
       .maybeSingle();
@@ -177,7 +180,7 @@ export class SupabaseClipService implements ClipService {
   ): Promise<CreativeServiceResult<EnterpriseTimelineClip>> {
     const { data: clip, error } = await this.client
       .from("creative_studio_timeline_clips")
-      .select("*")
+      .select(CREATIVE_CLIP_SELECT)
       .eq("id", clipId)
       .is("deleted_at", null)
       .maybeSingle();
@@ -206,7 +209,7 @@ export class SupabaseClipService implements ClipService {
       .from("creative_studio_timeline_clips")
       .update({ source_clip_id: clipId })
       .eq("id", result.data.id)
-      .select("*")
+      .select(CREATIVE_CLIP_SELECT)
       .single();
 
     return ok(

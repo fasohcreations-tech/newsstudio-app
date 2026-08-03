@@ -17,6 +17,8 @@ export {
   getShapeConfig,
   hasExplicitShapeConfig,
   isShapeComposerActive,
+  isMainVideoContainerObject,
+  normalizeMainVideoFrameShape,
   enableShapeComposer,
   disableShapeComposer,
   enableShapeComposerOnAllLayers,
@@ -74,6 +76,9 @@ export {
   SHAPE_PRESETS,
   SHAPE_KIND_OPTIONS,
   SHAPE_BEHAVIOR_OPTIONS,
+  SHAPE_REVEAL_EXIT_STYLE_OPTIONS,
+  SHAPE_REVEAL_EXIT_DIRECTION_OPTIONS,
+  SHAPE_TRAVEL_DIRECTION_OPTIONS,
 } from "@/features/scene-composer/lib/shape-composer/presets";
 
 export {
@@ -95,17 +100,28 @@ export {
 export {
   sampleShapeBehaviors,
   createShapeBehavior,
+  withExclusiveEntranceBehavior,
+  isEntranceBehaviorType,
+  isTravelBehaviorType,
+  ENTRANCE_BEHAVIOR_TYPES,
+  TRAVEL_BEHAVIOR_TYPES,
   type SampledShapeBehaviorStyle,
+  type TravelShapeInstance,
 } from "@/features/scene-composer/lib/shape-composer/behaviors";
 
 export {
   createDefaultReveal,
   resolveRevealConfig,
+  resolveRevealExit,
+  normalizeRevealExit,
   sampleShapeReveal,
   shapeRevealTotalMs,
   shapeBehaviorDurationMs,
   shapePreviewDurationMs,
   defaultRevealEntranceBehavior,
+  defaultRevealExitBehavior,
+  syncRevealExitBehavior,
   type SampledShapeReveal,
   type ShapeRevealPhase,
+  type ResolvedRevealExit,
 } from "@/features/scene-composer/lib/shape-composer/reveal";

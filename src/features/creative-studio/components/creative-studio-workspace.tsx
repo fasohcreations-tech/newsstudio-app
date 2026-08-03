@@ -62,6 +62,8 @@ type CreativeStudioWorkspaceProps = {
   templates: CreativeTemplate[];
   organizationId: string;
   mediaAssets?: MediaBinItem[];
+  /** Defaults to AI so Timeline Intelligence is visible on open. */
+  initialRightTab?: "inspector" | "ai";
 };
 
 export function CreativeStudioWorkspace({
@@ -69,6 +71,7 @@ export function CreativeStudioWorkspace({
   templates,
   organizationId,
   mediaAssets = [],
+  initialRightTab = "ai",
 }: CreativeStudioWorkspaceProps) {
   const [project, setProject] = useState(initialProject);
   const [pending, startTransition] = useTransition();
@@ -162,7 +165,7 @@ export function CreativeStudioWorkspace({
     return null;
   }, [primaryClipId, project.tracks]);
 
-  const [rightTab, setRightTab] = useState<"inspector" | "ai">("inspector");
+  const [rightTab, setRightTab] = useState<"inspector" | "ai">(initialRightTab);
 
   const selectedClipData = useMemo(() => {
     if (!selectedClip) return null;
@@ -670,7 +673,7 @@ export function CreativeStudioWorkspace({
                 )}
                 onClick={() => setRightTab("ai")}
               >
-                AI Assistant
+                AI · Timeline
               </button>
             </div>
             <div className="min-h-0 flex-1 overflow-auto p-3">
@@ -683,7 +686,36 @@ export function CreativeStudioWorkspace({
                   graphicsTrackId={graphicsTrackId}
                 />
               ) : (
-                <AiAssistantPanel />
+                <AiAssistantPanel
+                  projectId={project.id}
+                  timelineId={project.timeline?.id ?? null}
+                  storyTitle={project.title}
+                  onTimelineApplied={({ clips, trackId, track, timeline }) => {
+                    setProject((prev) => {
+                      const hasTrack = prev.tracks.some((row) => row.id === trackId);
+                      const tracks = hasTrack
+                        ? prev.tracks
+                        : [
+                            ...prev.tracks,
+                            { ...track, clips: [] as CreativeTimelineClip[] },
+                          ];
+                      return {
+                        ...prev,
+                        timeline: prev.timeline ?? timeline,
+                        tracks: tracks.map((row) =>
+                          row.id === trackId
+                            ? {
+                                ...row,
+                                clips: [...row.clips, ...clips].sort(
+                                  (a, b) => a.start_ms - b.start_ms,
+                                ),
+                              }
+                            : row,
+                        ),
+                      };
+                    });
+                  }}
+                />
               )}
             </div>
           </div>

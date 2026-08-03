@@ -1,10 +1,11 @@
 "use client";
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import Link from "next/link";
+import { useRouter } from "next/navigation";
 import {
   ArrowLeft,
   Download,
+  History,
   Redo2,
   Save,
   Undo2,
@@ -14,7 +15,10 @@ import { toast } from "sonner";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { ResizablePanel } from "@/features/platform/components/resizable-panel";
-import { placeMotionSceneOnTimelineAction } from "@/features/motion-scene-engine/actions/motion-scene.actions";
+import {
+  placeMotionSceneOnTimelineAction,
+  saveMotionSceneVersionAction,
+} from "@/features/motion-scene-engine/actions/motion-scene.actions";
 import type {
   MotionScene,
   SceneCategory,
@@ -26,9 +30,8 @@ import {
 import { EditorCanvas } from "@/features/scene-composer/components/editor/editor-canvas";
 import { EDITOR_UI } from "@/features/scene-composer/components/editor/editor.constants";
 import { EnhancedTimelinePanel } from "@/features/scene-composer/components/editor/enhanced-timeline-panel";
-import { MotionPresetDrawer } from "@/features/scene-composer/components/editor/motion-preset-drawer";
 import { PropertyInspectorPanel } from "@/features/scene-composer/components/editor/property-inspector-panel";
-import { ResizableTimelineShell } from "@/features/scene-composer/components/editor/resizable-timeline-shell";
+import { SceneHistoryPanel } from "@/features/scene-composer/components/scene-history-panel";
 import { WORKFLOW_STATE_LABELS } from "@/features/scene-composer/constants/scene-composer.constants";
 import {
   useComposerAutosave,
@@ -49,6 +52,14 @@ import type {
 } from "@/features/scene-composer/types/scene-composer.types";
 import { StoryAssetsPanel } from "@/features/story-production/components/panels/story-assets-panel";
 import { BindingsDebugPanel } from "@/features/story-production/components/panels/bindings-debug-panel";
+import { ComposerLayersPanel } from "@/features/scene-composer/components/panels/composer-layers-panel";
+import {
+  Sheet,
+  SheetContent,
+  SheetDescription,
+  SheetHeader,
+  SheetTitle,
+} from "@/components/ui/sheet";
 import { useStoryDataForm } from "@/features/story-production/hooks/use-story-data-form";
 import { useResolvedStoryBindings } from "@/features/story-production/hooks/use-resolved-story-bindings";
 import {
@@ -78,6 +89,7 @@ export function SceneComposerWorkspace({
   projectId,
   trackId,
 }: SceneComposerWorkspaceProps) {
+  const router = useRouter();
   const composer = useComposerDocument(initialScene);
   const playback = useComposerPlayback(
     composer.scene.duration_ms,
@@ -85,13 +97,20 @@ export function SceneComposerWorkspace({
   );
   const canvas = useComposerCanvas();
 
-  const [timelineZoom, setTimelineZoom] = useState(1);
   const [previewAspect] = useState<StoryPreviewAspect>("1920x1080");
   const [showBindingsDebug, setShowBindingsDebug] = useState(false);
+  const [historyOpen, setHistoryOpen] = useState(false);
+  const [mediaBrowserOpen, setMediaBrowserOpen] = useState(false);
   const [saveStatus, setSaveStatus] = useState<
     "idle" | "saving" | "saved" | "error"
   >("idle");
+  const [lastSavedAt, setLastSavedAt] = useState<string | null>(null);
   const saveStatusTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const lastSavedFingerprintRef = useRef<string>("");
+  const saveInFlightRef = useRef(false);
+  const pendingSaveRef = useRef(false);
+  const latestSceneRef = useRef(composer.scene);
+  latestSceneRef.current = composer.scene;
   const [mounted, setMounted] = useState(false);
   const [activeMediaTarget, setActiveMediaTarget] =
     useState<StoryMediaTarget | null>(null);
@@ -127,12 +146,17 @@ export function SceneComposerWorkspace({
       lastMotionPreviewIdRef.current = id;
       return;
     }
+    // Seek only — auto-play on every layer click remounted shape clocks and
+    // Object-tab Selects together, which fed the max-update-depth loop.
     if (id && id !== lastMotionPreviewIdRef.current) {
       playback.seek(selectedObject!.start_ms);
-      playback.play();
     }
     lastMotionPreviewIdRef.current = id;
-  }, [selectedObject?.id, selectedObject?.start_ms, playback.seek, playback.play]);
+  }, [selectedObject?.id, selectedObject?.start_ms, playback.seek]);
+
+  useEffect(() => {
+    if (browseRequestKey > 0) setMediaBrowserOpen(true);
+  }, [browseRequestKey]);
 
   const openMediaBrowser = useCallback(
     (object?: SceneObject | null) => {
@@ -144,6 +168,7 @@ export function SceneComposerWorkspace({
       setActiveMediaTarget(target);
       setBrowseRequestTarget(target);
       setBrowseRequestKey((key) => key + 1);
+      setMediaBrowserOpen(true);
     },
     [activeMediaTarget, canvas, selectedObject],
   );
@@ -159,15 +184,27 @@ export function SceneComposerWorkspace({
       setActiveMediaTarget(target);
       setBrowseRequestTarget(target);
       setBrowseRequestKey((key) => key + 1);
+      setMediaBrowserOpen(true);
     },
     [canvas],
   );
 
   const sceneMetadataRef = useRef(composer.scene.metadata);
   sceneMetadataRef.current = composer.scene.metadata;
+  const resolvedBindingsRef = useRef(composer.scene.resolved_bindings);
+  resolvedBindingsRef.current = composer.scene.resolved_bindings;
 
   const handleBindingsChange = useCallback(
     (bindings: Record<string, string>, data: StoryDataRecord) => {
+      const prevBindings = resolvedBindingsRef.current;
+      const prevStory = (sceneMetadataRef.current as Record<string, unknown> | undefined)
+        ?.story_data;
+      const bindingsUnchanged =
+        JSON.stringify(prevBindings) === JSON.stringify(bindings);
+      const storyUnchanged =
+        JSON.stringify(prevStory ?? null) === JSON.stringify(data);
+      if (bindingsUnchanged && storyUnchanged) return;
+
       composer.updateSceneMeta({
         resolved_bindings: bindings,
         metadata: {
@@ -201,10 +238,8 @@ export function SceneComposerWorkspace({
     [],
   );
 
-  const saveScene = useCallback(async (scene: ComposerScene) => {
-    setSaveStatus("saving");
-    const result = await saveComposerSceneAction({
-      sceneId: scene.id,
+  const sceneFingerprint = useCallback((scene: ComposerScene) => {
+    return JSON.stringify({
       name: scene.name,
       duration_ms: scene.duration_ms,
       frame_rate: scene.frame_rate,
@@ -214,25 +249,110 @@ export function SceneComposerWorkspace({
       resolved_bindings: scene.resolved_bindings,
       metadata: scene.metadata,
     });
-    if (!result.success) {
-      setSaveStatus("error");
-      toast.error(result.error ?? "Autosave failed");
-      return;
-    }
-    setSaveStatus("saved");
-    if (saveStatusTimerRef.current) {
-      clearTimeout(saveStatusTimerRef.current);
-    }
-    saveStatusTimerRef.current = setTimeout(() => {
-      setSaveStatus("idle");
-    }, 1800);
   }, []);
 
-  const { schedule } = useComposerAutosave(composer.scene, saveScene);
+  const saveScene = useCallback(
+    async (
+      scene: ComposerScene,
+      options?: { checkpoint?: boolean; revalidate?: boolean },
+    ) => {
+      const fingerprint = sceneFingerprint(scene);
+      const isAutosave = !options?.checkpoint;
+
+      // Skip no-op autosaves — UI was flashing "Saving..." even when DB already matched.
+      if (isAutosave && fingerprint === lastSavedFingerprintRef.current) {
+        return;
+      }
+
+      if (saveInFlightRef.current) {
+        pendingSaveRef.current = true;
+        return;
+      }
+
+      saveInFlightRef.current = true;
+      pendingSaveRef.current = false;
+      setSaveStatus("saving");
+
+      const result = await saveComposerSceneAction({
+        sceneId: scene.id,
+        name: scene.name,
+        duration_ms: scene.duration_ms,
+        frame_rate: scene.frame_rate,
+        workflow_state: scene.workflow_state,
+        composer_settings: scene.composer_settings,
+        composer_document: scene.composer_document,
+        resolved_bindings: scene.resolved_bindings,
+        metadata: scene.metadata,
+        // Autosave must not revalidate server props (causes update-depth loops).
+        revalidate: options?.revalidate ?? Boolean(options?.checkpoint),
+        // Relational upserts only on explicit Save — avoids 409 spam + egress.
+        syncTables: Boolean(options?.checkpoint),
+      });
+
+      if (!result.success) {
+        saveInFlightRef.current = false;
+        setSaveStatus("error");
+        toast.error(result.error ?? "Autosave failed");
+        return;
+      }
+
+      // Confirm persistence from server payload (updated_at present = DB write succeeded).
+      lastSavedFingerprintRef.current = fingerprint;
+      const savedAt = result.data.updated_at
+        ? new Date(result.data.updated_at)
+        : new Date();
+      setLastSavedAt(
+        savedAt.toLocaleTimeString(undefined, {
+          hour: "2-digit",
+          minute: "2-digit",
+          second: "2-digit",
+        }),
+      );
+
+      // Explicit Save / Ctrl+S: update the same scene file, then add a history checkpoint.
+      if (options?.checkpoint) {
+        const checkpoint = await saveMotionSceneVersionAction({
+          sceneId: scene.id,
+          label: `Saved · ${new Date().toLocaleString()}`,
+        });
+        if (checkpoint.success) {
+          composer.updateSceneMeta({ version: checkpoint.data.version });
+        } else {
+          toast.error(checkpoint.error ?? "Saved, but history checkpoint failed");
+        }
+      }
+
+      setSaveStatus("saved");
+      if (saveStatusTimerRef.current) {
+        clearTimeout(saveStatusTimerRef.current);
+      }
+      saveStatusTimerRef.current = setTimeout(() => {
+        setSaveStatus("idle");
+      }, 2400);
+
+      saveInFlightRef.current = false;
+      if (pendingSaveRef.current) {
+        pendingSaveRef.current = false;
+        void saveSceneRef.current(latestSceneRef.current, { revalidate: false });
+      }
+    },
+    [composer.updateSceneMeta, sceneFingerprint],
+  );
+
+  const saveSceneRef = useRef(saveScene);
+  saveSceneRef.current = saveScene;
+
+  const { schedule } = useComposerAutosave(composer.scene, (scene) =>
+    saveSceneRef.current(scene, { revalidate: false }),
+  );
 
   useEffect(() => {
+    // Only schedule when document content actually differs from last DB write.
+    if (sceneFingerprint(composer.scene) === lastSavedFingerprintRef.current) {
+      return;
+    }
     schedule();
-  }, [composer.scene, schedule]);
+  }, [composer.scene, schedule, sceneFingerprint]);
 
   const setObjects = useCallback(
     (objects: SceneObject[], label?: string) => {
@@ -244,26 +364,103 @@ export function SceneComposerWorkspace({
 
   const patchObject = useCallback(
     (id: string, patch: Partial<SceneObject>) => {
-      const next = composer.scene.composer_document.objects.map((object) => {
-        if (object.id !== id) return object;
-        return {
-          ...object,
-          ...patch,
-          style: patch.style ? { ...object.style, ...patch.style } : object.style,
-          transform: patch.transform
-            ? { ...object.transform, ...patch.transform }
-            : object.transform,
-          metadata: patch.metadata
-            ? { ...object.metadata, ...patch.metadata }
-            : object.metadata,
-          content: patch.content
-            ? { ...object.content, ...patch.content }
-            : object.content,
-        };
-      });
-      setObjects(next, "Update object");
+      const objects = composer.scene.composer_document.objects;
+      const current = objects.find((object) => object.id === id);
+      if (!current) return;
+
+      const merged = {
+        ...current,
+        ...patch,
+        style: patch.style ? { ...current.style, ...patch.style } : current.style,
+        transform: patch.transform
+          ? { ...current.transform, ...patch.transform }
+          : current.transform,
+        metadata: patch.metadata
+          ? { ...current.metadata, ...patch.metadata }
+          : current.metadata,
+        content: patch.content
+          ? { ...current.content, ...patch.content }
+          : current.content,
+      };
+
+      // Bail when Select/Switch mount-sync would rewrite identical data.
+      if (
+        JSON.stringify({
+          style: current.style,
+          transform: current.transform,
+          metadata: current.metadata,
+          content: current.content,
+          name: current.name,
+          visible: current.visible,
+          locked: current.locked,
+          object_type: current.object_type,
+        }) ===
+        JSON.stringify({
+          style: merged.style,
+          transform: merged.transform,
+          metadata: merged.metadata,
+          content: merged.content,
+          name: merged.name,
+          visible: merged.visible,
+          locked: merged.locked,
+          object_type: merged.object_type,
+        })
+      ) {
+        return;
+      }
+
+      setObjects(
+        objects.map((object) => (object.id === id ? merged : object)),
+        "Update object",
+      );
     },
     [composer.scene.composer_document.objects, setObjects],
+  );
+
+  const applyObjectTransform = useCallback(
+    (
+      id: string,
+      transform: SceneObject["transform"],
+      mode: "live" | "commit",
+      origin?: SceneObject["transform"],
+    ) => {
+      const objects = composer.scene.composer_document.objects;
+      if (mode === "live") {
+        composer.replaceObjectsSilent(
+          objects.map((object) =>
+            object.id === id
+              ? { ...object, transform: { ...object.transform, ...transform } }
+              : object,
+          ),
+        );
+        schedule();
+        return;
+      }
+
+      const previousObjects = objects.map((object) =>
+        object.id === id
+          ? {
+              ...object,
+              transform: {
+                ...object.transform,
+                ...(origin ?? object.transform),
+              },
+            }
+          : object,
+      );
+      const nextObjects = objects.map((object) =>
+        object.id === id
+          ? { ...object, transform: { ...object.transform, ...transform } }
+          : object,
+      );
+      composer.commitObjectsChange(
+        nextObjects,
+        previousObjects,
+        "Move / resize layer",
+      );
+      schedule();
+    },
+    [composer, schedule],
   );
 
   const addShapeObject = useCallback(
@@ -339,7 +536,7 @@ export function SceneComposerWorkspace({
       }
       if ((event.metaKey || event.ctrlKey) && event.key === "s") {
         event.preventDefault();
-        void saveScene(composer.scene);
+        void saveScene(composer.scene, { checkpoint: true });
       }
     };
     window.addEventListener("keydown", onKeyDown);
@@ -362,8 +559,8 @@ export function SceneComposerWorkspace({
           size="sm"
           variant="ghost"
           className={EDITOR_UI.button}
-          nativeButton={false}
-          render={<Link href="/creative-studio/scenes" />}
+          aria-label="Back to Scene Library"
+          onClick={() => router.push("/creative-studio/scenes")}
         >
           <ArrowLeft className="size-4" />
         </Button>
@@ -467,47 +664,74 @@ export function SceneComposerWorkspace({
           size="sm"
           variant="outline"
           className={EDITOR_UI.button}
-          onClick={() => void saveScene(composer.scene)}
+          onClick={() => setHistoryOpen(true)}
+        >
+          <History className="mr-1.5 size-4" />
+          History
+        </Button>
+        <Button
+          type="button"
+          size="sm"
+          variant="outline"
+          className={EDITOR_UI.button}
+          onClick={() => void saveScene(composer.scene, { checkpoint: true })}
         >
           <Save className="mr-1.5 size-4" />
           Save
         </Button>
         <span
-          className={`min-w-[84px] text-right text-[12px] ${
+          className={`min-w-[120px] text-right text-[12px] ${
             saveStatus === "error"
               ? "text-destructive"
               : "text-muted-foreground"
           }`}
+          title={
+            lastSavedAt
+              ? "Confirmed write to the scene database record"
+              : undefined
+          }
         >
           {saveStatus === "saving"
-            ? "Saving..."
+            ? "Saving…"
             : saveStatus === "saved"
-              ? "Saved"
+              ? lastSavedAt
+                ? `Saved · ${lastSavedAt}`
+                : "Saved"
               : saveStatus === "error"
                 ? "Save failed"
-                : ""}
+                : lastSavedAt
+                  ? `Saved · ${lastSavedAt}`
+                  : ""}
         </span>
       </header>
 
       <div className="flex min-h-0 flex-1">
         <ResizablePanel
-          storageKey="mediaos.composer.left-v36"
+          storageKey="mediaos.composer.left-layers-v1"
           defaultWidth={300}
           minWidth={260}
-          maxWidth={380}
+          maxWidth={400}
           side="left"
           alwaysVisible
         >
           <div className="flex h-full min-h-0 flex-col">
             <div className="min-h-0 flex-1">
-              <StoryAssetsPanel
-                onApplyMedia={storyForm.applyMedia}
-                data={storyForm.data}
-                activeTarget={activeMediaTarget}
-                onActiveTargetChange={setActiveMediaTarget}
-                organizationId={composer.scene.organization_id}
-                browseRequestKey={browseRequestKey}
-                browseRequestTarget={browseRequestTarget}
+              <ComposerLayersPanel
+                objects={composer.scene.composer_document.objects}
+                selectedIds={canvas.selection.selectedObjectIds}
+                onObjectsChange={setObjects}
+                onSelect={(id, additive) => {
+                  canvas.selectObject(id, additive);
+                  if (id) {
+                    const object =
+                      composer.scene.composer_document.objects.find(
+                        (item) => item.id === id,
+                      ) ?? null;
+                    if (object) {
+                      playback.seek(object.start_ms);
+                    }
+                  }
+                }}
               />
             </div>
             <BindingsDebugPanel
@@ -538,8 +762,32 @@ export function SceneComposerWorkspace({
               onToggle={canvas.toggle}
               onSetPanning={canvas.setIsPanning}
               onBrowseMedia={handleBrowseFromCanvas}
+              onTransformLive={(id, transform) =>
+                applyObjectTransform(id, transform, "live")
+              }
+              onTransformCommit={(id, transform, origin) =>
+                applyObjectTransform(id, transform, "commit", origin)
+              }
             />
           </div>
+          <EnhancedTimelinePanel
+            playheadMs={playback.playheadMs}
+            durationMs={composer.scene.duration_ms}
+            frameRate={playback.frameRate}
+            isPlaying={playback.isPlaying}
+            loopPlayback={playback.loopPlayback}
+            formatTimecode={playback.formatTimecode}
+            onSeek={playback.seek}
+            onTogglePlay={playback.togglePlay}
+            onStop={playback.stop}
+            onRestart={playback.restart}
+            onStepFrame={playback.stepFrame}
+            onToggleLoop={() => playback.setLoopPlayback((v) => !v)}
+            onSetFrameRate={(fps) => {
+              playback.setFrameRate(fps);
+              composer.updateSceneMeta({ frame_rate: fps });
+            }}
+          />
         </div>
 
         <ResizablePanel
@@ -570,43 +818,47 @@ export function SceneComposerWorkspace({
         </ResizablePanel>
       </div>
 
-      <ResizableTimelineShell>
-        <div className="flex h-full min-h-0 flex-col">
-          <MotionPresetDrawer
-            selectedObject={selectedObject}
-            onObjectPatch={patchObject}
-            onApplied={() => {
-              playback.restart();
-            }}
-          />
-          <div className="min-h-0 flex-1">
-            <EnhancedTimelinePanel
-              objects={composer.scene.composer_document.objects}
-              playheadMs={playback.playheadMs}
-              durationMs={composer.scene.duration_ms}
-              frameRate={playback.frameRate}
-              isPlaying={playback.isPlaying}
-              loopPlayback={playback.loopPlayback}
-              selectedIds={canvas.selection.selectedObjectIds}
-              formatTimecode={playback.formatTimecode}
-              onSeek={playback.seek}
-              onTogglePlay={playback.togglePlay}
-              onStop={playback.stop}
-              onRestart={playback.restart}
-              onStepFrame={playback.stepFrame}
-              onToggleLoop={() => playback.setLoopPlayback((v) => !v)}
-              onSetFrameRate={(fps) => {
-                playback.setFrameRate(fps);
-                composer.updateSceneMeta({ frame_rate: fps });
+      <SceneHistoryPanel
+        sceneId={composer.scene.id}
+        sceneName={composer.scene.name}
+        currentVersion={composer.scene.version}
+        open={historyOpen}
+        onOpenChange={setHistoryOpen}
+        onVersionSaved={(version) => composer.updateSceneMeta({ version })}
+        onRestored={() => {
+          // Full reload so the restored document replaces client state
+          // (composer no longer resets on updated_at to avoid autosave loops).
+          window.location.reload();
+        }}
+        persistLiveScene={async () => {
+          await saveScene(composer.scene, { revalidate: false });
+        }}
+      />
+
+      <Sheet open={mediaBrowserOpen} onOpenChange={setMediaBrowserOpen}>
+        <SheetContent side="left" className="w-full p-0 sm:max-w-md">
+          <SheetHeader className="sr-only">
+            <SheetTitle>Media Browser</SheetTitle>
+            <SheetDescription>
+              Choose media for the selected story placeholder.
+            </SheetDescription>
+          </SheetHeader>
+          <div className="h-full min-h-0">
+            <StoryAssetsPanel
+              onApplyMedia={(field, url) => {
+                storyForm.applyMedia(field, url);
+                setMediaBrowserOpen(false);
               }}
-              onSelect={(id) => canvas.selectObject(id)}
-              timelineZoom={timelineZoom}
-              onTimelineZoom={setTimelineZoom}
-              onObjectsChange={setObjects}
+              data={storyForm.data}
+              activeTarget={activeMediaTarget}
+              onActiveTargetChange={setActiveMediaTarget}
+              organizationId={composer.scene.organization_id}
+              browseRequestKey={browseRequestKey}
+              browseRequestTarget={browseRequestTarget}
             />
           </div>
-        </div>
-      </ResizableTimelineShell>
+        </SheetContent>
+      </Sheet>
     </div>
   );
 }

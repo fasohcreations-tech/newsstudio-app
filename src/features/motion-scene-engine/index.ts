@@ -38,4 +38,7 @@ export {
   duplicateMotionSceneAction,
   placeMotionSceneOnTimelineAction,
   listMotionScenesAction,
+  saveMotionSceneVersionAction,
+  listMotionSceneVersionsAction,
+  restoreMotionSceneVersionAction,
 } from "@/features/motion-scene-engine/actions/motion-scene.actions";

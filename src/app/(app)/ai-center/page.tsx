@@ -14,8 +14,28 @@ import { checkAllProvidersHealth } from "@/features/ai/services/ai-orchestrator"
 import * as AIJobManager from "@/features/ai/services/ai-job-manager";
 import { getProviderKeyPresence } from "@/features/ai/lib/server-env";
 import { AICenterDashboard } from "@/features/ai/components/ai-center-dashboard";
+import { AIIntelligenceDashboard } from "@/features/ai/intelligence/components/ai-intelligence-dashboard";
+import { getIntelligenceDashboard } from "@/features/ai/intelligence/services/intelligence-dashboard.service";
+import { AI_INTELLIGENCE_DOMAINS } from "@/features/ai/intelligence/types/intelligence.types";
+import type { IntelligenceDashboardSnapshot } from "@/features/ai/intelligence/types/intelligence.types";
 
 export const metadata: Metadata = { title: "AI Center" };
+
+function emptyIntelligenceSnapshot(): IntelligenceDashboardSnapshot {
+  return {
+    byDomain: Object.fromEntries(
+      AI_INTELLIGENCE_DOMAINS.map((domain) => [
+        domain,
+        { pending: 0, accepted: 0, rejected: 0 },
+      ]),
+    ) as IntelligenceDashboardSnapshot["byDomain"],
+    recent: [],
+    queue: [],
+    timelineDrafts: [],
+    voiceJobs: [],
+    broadcastHealth: [],
+  };
+}
 
 export default async function AiCenterPage() {
   const user = await requireAuth("/ai-center");
@@ -47,19 +67,25 @@ export default async function AiCenterPage() {
   }
 
   const orgId = membership.organization.id;
-  const [{ settings }, health, { jobs, error: jobsError }, { stats }] =
-    await Promise.all([
-      getAIOrgSettings(supabase, orgId),
-      checkAllProvidersHealth(supabase, orgId),
-      AIJobManager.listRecentJobs(supabase, orgId, 15),
-      AIJobManager.getUsageStats(supabase, orgId),
-    ]);
+  const [
+    { settings },
+    health,
+    { jobs, error: jobsError },
+    { stats },
+    intelligence,
+  ] = await Promise.all([
+    getAIOrgSettings(supabase, orgId),
+    checkAllProvidersHealth(supabase, orgId),
+    AIJobManager.listRecentJobs(supabase, orgId, 15),
+    AIJobManager.getUsageStats(supabase, orgId),
+    getIntelligenceDashboard(supabase, orgId),
+  ]);
 
   return (
-    <div>
+    <div className="space-y-10">
       <PageHeader
         title="AI Center"
-        description={`${membership.organization.name} · Provider-agnostic orchestration`}
+        description={`${membership.organization.name} · MediaOS intelligence platform`}
         actions={
           <div className="flex flex-wrap gap-2">
             <Link
@@ -83,6 +109,12 @@ export default async function AiCenterPage() {
           </div>
         }
       />
+
+      <AIIntelligenceDashboard
+        snapshot={intelligence.data ?? emptyIntelligenceSnapshot()}
+        snapshotError={intelligence.error}
+      />
+
       <AICenterDashboard
         settings={settings}
         health={health}

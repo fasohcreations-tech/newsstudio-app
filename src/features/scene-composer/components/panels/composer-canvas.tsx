@@ -79,20 +79,27 @@ export function ComposerCanvas({
     const container = containerRef.current;
     if (!container) return;
 
+    let frame = 0;
     const fit = () => {
-      const rect = container.getBoundingClientRect();
-      onFitZoom(
-        canvasService.computeFitZoom(
-          artboard,
-          { width: rect.width, height: rect.height },
-        ),
-      );
+      cancelAnimationFrame(frame);
+      frame = requestAnimationFrame(() => {
+        const rect = container.getBoundingClientRect();
+        onFitZoom(
+          canvasService.computeFitZoom(artboard, {
+            width: rect.width,
+            height: rect.height,
+          }),
+        );
+      });
     };
 
     fit();
     const observer = new ResizeObserver(fit);
     observer.observe(container);
-    return () => observer.disconnect();
+    return () => {
+      cancelAnimationFrame(frame);
+      observer.disconnect();
+    };
   }, [artboard.width, artboard.height, onFitZoom]);
 
   const handlePointerDown = (
