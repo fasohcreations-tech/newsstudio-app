@@ -18,6 +18,7 @@ import { CreateProjectDialog } from "@/features/creative-studio/components/dialo
 import type { CreativeProject } from "@/features/creative-studio/types/creative-studio.types";
 import { RelativeTime } from "@/features/newsroom/components/relative-time";
 import { StoryTimelineAssemblyWorkspace } from "@/features/story-timeline-assembly/components/story-timeline-assembly-workspace";
+import { VideoRenderExportPanel } from "@/features/video-render-export/components/video-render-export-panel";
 
 type TimelineTabProps = {
   storyId: string;
@@ -28,7 +29,8 @@ type TimelineTabProps = {
 
 /**
  * Story Workspace Timeline tab.
- * Primary: Production Timeline Assembly (Step 3).
+ * Primary: Production Timeline Assembly (Step 3.0).
+ * Then: Video Rendering & Export (Step 3.1) — does not modify assembly.
  * Secondary: optional Creative Studio project (manual polish — unchanged).
  */
 export function TimelineTab({
@@ -46,6 +48,12 @@ export function TimelineTab({
       <StoryTimelineAssemblyWorkspace
         storyId={storyId}
         storyTitle={storyTitle}
+      />
+
+      <VideoRenderExportPanel
+        storyId={storyId}
+        storyTitle={storyTitle}
+        organizationId={organizationId}
       />
 
       <Card className="border-border/60">
