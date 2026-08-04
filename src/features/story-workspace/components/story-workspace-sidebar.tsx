@@ -113,7 +113,7 @@ export function StoryWorkspaceSidebar({
                 className="justify-start"
                 onClick={onFocusMedia}
               >
-                Manage media (AI Producer)
+                Open Assets discovery
               </Button>
               {onFocusProducer ? (
                 <Button

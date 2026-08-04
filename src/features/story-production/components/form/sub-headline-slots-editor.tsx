@@ -1,7 +1,16 @@
 "use client";
 
 import { useMemo, useState, useTransition } from "react";
-import { FolderOpen, ImageIcon, Loader2, Sparkles, Trash2, Type, Video } from "lucide-react";
+import {
+  FolderOpen,
+  ImageIcon,
+  Loader2,
+  Search,
+  Sparkles,
+  Trash2,
+  Type,
+  Video,
+} from "lucide-react";
 import { toast } from "sonner";
 
 import { Badge } from "@/components/ui/badge";
@@ -14,6 +23,11 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
+import {
+  importWebMediaAsAssetAction,
+  searchWebMediaForSubHeadlineAction,
+} from "@/features/ai-asset-discovery/actions/discovery.actions";
+import type { WebMediaHit } from "@/features/ai-asset-discovery/services/web-media-search.service";
 import { generateProducerMediaAction } from "@/features/ai-news-producer/actions/producer-media.actions";
 import { ManglishLineInput } from "@/features/smart-editor/components/manglish-line-input";
 import { SubHeadlineMediaThumb } from "@/features/story-production/components/form/sub-headline-media-thumb";
@@ -90,6 +104,14 @@ export function SubHeadlineSlotsEditor({
 }: SubHeadlineSlotsEditorProps) {
   const [pickerSlot, setPickerSlot] = useState<number | null>(null);
   const [pendingSlot, setPendingSlot] = useState<number | null>(null);
+  const [findSlot, setFindSlot] = useState<number | null>(null);
+  const [importingId, setImportingId] = useState<string | null>(null);
+  const [suggestions, setSuggestions] = useState<Record<number, WebMediaHit[]>>(
+    {},
+  );
+  const [searchMeta, setSearchMeta] = useState<
+    Record<number, { query: string; providers: string[] }>
+  >({});
   const [pending, startTransition] = useTransition();
 
   const paddedTexts = useMemo(() => {
@@ -121,6 +143,78 @@ export function SubHeadlineSlotsEditor({
 
   function clearMedia(index: number) {
     patchMedia(index, emptySubHeadlineMediaRef());
+  }
+
+  function findAssetsForSlot(index: number) {
+    if (!storyId) {
+      toast.error("Save the story before searching media.");
+      return;
+    }
+    const line = paddedTexts[index]?.trim();
+    if (!line) {
+      toast.error("Enter Sub Headline text first, then search.");
+      return;
+    }
+
+    const mediaFilter = "both";
+
+    setFindSlot(index);
+    startTransition(async () => {
+      const result = await searchWebMediaForSubHeadlineAction({
+        storyId,
+        panelIndex: index,
+        sceneHeadline: line,
+        mediaFilter,
+      });
+      setFindSlot(null);
+      if (!result.success) {
+        toast.error(result.error);
+        return;
+      }
+      setSuggestions((prev) => ({ ...prev, [index]: result.data.hits }));
+      setSearchMeta((prev) => ({
+        ...prev,
+        [index]: {
+          query: result.data.query,
+          providers: result.data.providersUsed,
+        },
+      }));
+      if (result.data.warning) {
+        toast.message(result.data.warning);
+      }
+      toast.success(
+        result.data.hits.length
+          ? `Found ${result.data.hits.length} · ${result.data.providersUsed.join(", ") || "web"} · “${result.data.query}”`
+          : result.data.warning || "No web results — try different wording",
+      );
+    });
+  }
+
+  function addWebHitAsAsset(index: number, hit: WebMediaHit) {
+    if (!storyId) return;
+    setImportingId(hit.id);
+    startTransition(async () => {
+      const result = await importWebMediaAsAssetAction({
+        storyId,
+        panelIndex: index,
+        hit,
+      });
+      setImportingId(null);
+      if (!result.success) {
+        toast.error(result.error);
+        return;
+      }
+      patchMedia(index, {
+        kind: result.data.kind,
+        ref: result.data.libraryRef,
+      });
+      setSuggestions((prev) => ({ ...prev, [index]: [] }));
+      toast.success(
+        result.data.linkedExternally
+          ? `Linked ${result.data.kind} · Sub Headline ${index + 1}`
+          : `Added to library · linked to Sub Headline ${index + 1}`,
+      );
+    });
   }
 
   function generateForSlot(index: number) {
@@ -166,14 +260,17 @@ export function SubHeadlineSlotsEditor({
   return (
     <div className="space-y-3">
       <p className="text-[11px] text-muted-foreground">
-        Each Sub Headline can link an image, video, or caption for scene
-        building. Browse the library or generate an AI image (uses tokens).
+        For each Sub Headline, AI search stock + YouTube / Google / Facebook
+        (Find), then add or link media. Browse / generate remain available.
       </p>
 
       <div className="grid gap-3 sm:grid-cols-2">
         {Array.from({ length: SUB_HEADLINE_SLOT_COUNT }, (_, index) => {
           const slotMedia = paddedMedia[index] ?? emptySubHeadlineMediaRef();
           const generating = pending && pendingSlot === index;
+          const finding = pending && findSlot === index;
+          const slotSuggestions = suggestions[index] ?? [];
+          const meta = searchMeta[index];
           return (
             <div
               key={index}
@@ -205,6 +302,91 @@ export function SubHeadlineSlotsEditor({
                 onChange={(value) => patchText(index, value)}
               />
 
+              <div className="flex flex-wrap gap-1.5">
+                <Button
+                  type="button"
+                  size="sm"
+                  className="h-7 text-xs"
+                  disabled={disabled || pending || !storyId}
+                  onClick={() => findAssetsForSlot(index)}
+                >
+                  {finding ? (
+                    <Loader2 className="size-3.5 animate-spin" />
+                  ) : (
+                    <Search className="size-3.5" />
+                  )}
+                  Find image/video
+                </Button>
+                <Button
+                  type="button"
+                  size="sm"
+                  variant="outline"
+                  className="h-7 text-xs"
+                  disabled={disabled || pending}
+                  onClick={() => {
+                    if (!slotMedia.kind) {
+                      patchMedia(index, { kind: "image", ref: "" });
+                    }
+                    setPickerSlot(index);
+                  }}
+                >
+                  <FolderOpen className="size-3.5" />
+                  Browse
+                </Button>
+              </div>
+
+              {slotSuggestions.length > 0 ? (
+                <div className="space-y-1.5 rounded-md border border-border/50 bg-background p-2">
+                  <p className="text-[10px] font-medium text-muted-foreground">
+                    Web results
+                    {meta?.query ? ` · “${meta.query}”` : ""} — click to add /
+                    link
+                  </p>
+                  <div className="grid max-h-52 grid-cols-2 gap-1.5 overflow-auto">
+                    {slotSuggestions.slice(0, 12).map((hit) => {
+                      const importing = pending && importingId === hit.id;
+                      const linkOnly =
+                        hit.linkOnly ||
+                        hit.provider === "youtube" ||
+                        hit.provider === "facebook";
+                      return (
+                        <button
+                          key={hit.id}
+                          type="button"
+                          disabled={disabled || pending}
+                          className="overflow-hidden rounded border border-border/50 text-left transition hover:border-foreground/30"
+                          onClick={() => addWebHitAsAsset(index, hit)}
+                        >
+                          <div className="relative aspect-video bg-muted/40">
+                            {hit.thumbnailUrl ? (
+                              // eslint-disable-next-line @next/next/no-img-element
+                              <img
+                                src={hit.thumbnailUrl}
+                                alt=""
+                                className="h-full w-full object-cover"
+                              />
+                            ) : null}
+                            {importing ? (
+                              <div className="absolute inset-0 flex items-center justify-center bg-background/60">
+                                <Loader2 className="size-4 animate-spin" />
+                              </div>
+                            ) : null}
+                          </div>
+                          <p className="line-clamp-2 p-1 text-[10px]">
+                            {hit.kind === "video" ? "🎬 " : ""}
+                            {hit.title}
+                          </p>
+                          <p className="px-1 pb-1 text-[9px] text-muted-foreground">
+                            {hit.provider}
+                            {linkOnly ? " · Link video" : " · Add as asset"}
+                          </p>
+                        </button>
+                      );
+                    })}
+                  </div>
+                </div>
+              ) : null}
+
               <div className="space-y-1.5">
                 <Label className="text-[11px] text-muted-foreground">
                   Media reference
@@ -219,8 +401,7 @@ export function SubHeadlineSlotsEditor({
                     }
                     patchMedia(index, {
                       kind: value as SubHeadlineMediaKind,
-                      ref:
-                        value === "caption" ? "" : slotMedia.ref,
+                      ref: value === "caption" ? "" : slotMedia.ref,
                     });
                   }}
                 >
@@ -264,17 +445,6 @@ export function SubHeadlineSlotsEditor({
                     {shortRefLabel(slotMedia.ref)}
                   </p>
                   <div className="flex flex-wrap gap-1.5">
-                    <Button
-                      type="button"
-                      size="sm"
-                      variant="outline"
-                      className="h-7 text-xs"
-                      disabled={disabled || generating}
-                      onClick={() => setPickerSlot(index)}
-                    >
-                      <FolderOpen className="size-3.5" />
-                      Browse
-                    </Button>
                     {slotMedia.kind === "image" ? (
                       <Button
                         type="button"
@@ -291,19 +461,7 @@ export function SubHeadlineSlotsEditor({
                         )}
                         Generate
                       </Button>
-                    ) : (
-                      <Button
-                        type="button"
-                        size="sm"
-                        variant="outline"
-                        className="h-7 text-xs"
-                        disabled
-                        title="AI video pipeline ships next — browse/upload for now"
-                      >
-                        <Video className="size-3.5" />
-                        Generate
-                      </Button>
-                    )}
+                    ) : null}
                     {slotMedia.ref ? (
                       <Button
                         type="button"
@@ -352,7 +510,15 @@ export function SubHeadlineSlotsEditor({
           onOpenChange={(open) => {
             if (!open) setPickerSlot(null);
           }}
-          target={activeTarget}
+          target={{
+            ...activeTarget,
+            kind:
+              paddedMedia[pickerSlot]?.kind === "video" ? "video" : "image",
+            accept:
+              paddedMedia[pickerSlot]?.kind === "video"
+                ? "video/*"
+                : "image/*",
+          }}
           organizationId={organizationId}
           onPick={(url) => {
             const kind =

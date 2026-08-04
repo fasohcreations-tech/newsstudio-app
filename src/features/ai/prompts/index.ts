@@ -19,6 +19,7 @@ import {
   mediaImageGeneratePrompt,
   mediaSubHeadlineImagePrompt,
 } from "@/features/ai/prompts/media";
+import { discoveryExpandKeywordsPrompt, discoveryWebSearchQueryPrompt } from "@/features/ai/prompts/discovery";
 import {
   intelligenceAssetPrompt,
   intelligenceBroadcastPrompt,
@@ -59,6 +60,8 @@ export const PROMPT_CATALOG: PromptTemplate[] = [
   editorTransformPrompt,
   mediaImageGeneratePrompt,
   mediaSubHeadlineImagePrompt,
+  discoveryExpandKeywordsPrompt,
+  discoveryWebSearchQueryPrompt,
   intelligenceStoryPrompt,
   intelligenceTimelinePrompt,
   intelligenceScenePrompt,

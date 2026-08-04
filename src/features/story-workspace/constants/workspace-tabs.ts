@@ -2,8 +2,8 @@ export const STORY_WORKSPACE_TABS = [
   { id: "overview", label: "Overview", ready: true },
   /** Script editing lives under AI Producer → Script */
   { id: "script", label: "Script", ready: false },
-  /** Media lives under AI Producer → Media */
-  { id: "media", label: "Media", ready: false },
+  /** AI Asset Discovery (Pipeline Step 2A) — before Scenes */
+  { id: "assets", label: "Assets", ready: true },
   { id: "ai-producer", label: "AI Producer", ready: true },
   { id: "timeline", label: "Timeline", ready: true },
   { id: "graphics", label: "Scenes", ready: true },

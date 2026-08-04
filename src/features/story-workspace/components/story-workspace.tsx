@@ -10,6 +10,7 @@ import { StoryWorkspaceStatusBar } from "@/features/story-workspace/components/s
 import { OverviewTab } from "@/features/story-workspace/components/tabs/overview-tab";
 import { TimelineTab } from "@/features/story-workspace/components/tabs/timeline-tab";
 import { StoryGraphicsTab } from "@/features/story-workspace/components/tabs/graphics-tab";
+import { StoryAssetsTab } from "@/features/story-workspace/components/tabs/assets-tab";
 import { PublishingTab } from "@/features/story-workspace/components/tabs/publishing-tab";
 import { WorkspacePlaceholderTab } from "@/features/story-workspace/components/tabs/workspace-placeholder-tab";
 import { AiNewsProducerTab } from "@/features/ai-news-producer/components/ai-news-producer-tab";
@@ -55,11 +56,12 @@ type StoryWorkspaceProps = {
   creativeProjects?: CreativeProject[];
 };
 
+/** Legacy tab ids that redirect into AI Producer sections. */
 function normalizeWorkspaceTab(
-  tab: StoryWorkspaceTabId,
+  tab: StoryWorkspaceTabId | "media",
 ): StoryWorkspaceTabId {
   if (tab === "script" || tab === "media") return "ai-producer";
-  return tab;
+  return tab as StoryWorkspaceTabId;
 }
 
 export function StoryWorkspace({
@@ -139,8 +141,9 @@ export function StoryWorkspace({
   }, [script]);
 
   useEffect(() => {
-    if (tab === "script" || tab === "media") {
-      setProducerSection(tab === "media" ? "media" : "script");
+    // Legacy persisted "media" / "script" tabs opened Producer sections.
+    if (tab === "script" || (tab as string) === "media") {
+      setProducerSection((tab as string) === "media" ? "media" : "script");
       setTab("ai-producer");
     }
   }, [tab, setTab]);
@@ -155,7 +158,7 @@ export function StoryWorkspace({
 
   useKeyboardShortcut("ctrl+1", () => setTab("overview"));
   useKeyboardShortcut("ctrl+2", () => openProducer("script"));
-  useKeyboardShortcut("ctrl+3", () => openProducer("media"));
+  useKeyboardShortcut("ctrl+3", () => setTab("assets"));
   useKeyboardShortcut("ctrl+4", () => openProducer("research"));
   useKeyboardShortcut("ctrl+5", () => setTab("timeline"));
   useKeyboardShortcut("ctrl+6", () => setTab("voice"));
@@ -234,7 +237,6 @@ export function StoryWorkspace({
               story={workspaceStory}
               onOpenTab={(next) => {
                 if (next === "script") openProducer("script");
-                else if (next === "media") openProducer("media");
                 else setTab(next);
               }}
               onStoryUpdated={setWorkspaceStory}
@@ -261,6 +263,10 @@ export function StoryWorkspace({
                 };
               }}
             />
+          ) : null}
+
+          {activeTab === "assets" ? (
+            <StoryAssetsTab story={workspaceStory} disabled={deleted} />
           ) : null}
 
           {activeTab === "timeline" ? (
@@ -323,7 +329,7 @@ export function StoryWorkspace({
           <StoryWorkspaceSidebar
             story={workspaceStory}
             onFocusScript={() => openProducer("script")}
-            onFocusMedia={() => openProducer("media")}
+            onFocusMedia={() => setTab("assets")}
             onFocusProducer={() => openProducer("research")}
             onFocusVoice={() => setTab("voice")}
           />

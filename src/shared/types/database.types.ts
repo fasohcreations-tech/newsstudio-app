@@ -44,6 +44,44 @@ export type StorySceneInstanceStatus =
   | "editing"
   | "archived";
 
+export type AssetDiscoveryRunStatus =
+  | "draft"
+  | "running"
+  | "ready"
+  | "failed"
+  | "archived";
+
+export type AssetDiscoveryProvider =
+  | "local_media_library"
+  | "supabase_storage"
+  | "organization_library"
+  | "free_image"
+  | "free_video"
+  | "licensed_stock"
+  | "news_agency"
+  | "custom_search"
+  | "previously_used";
+
+export type AssetDiscoveryKind =
+  | "video"
+  | "image"
+  | "illustration"
+  | "map"
+  | "icon"
+  | "logo"
+  | "chart"
+  | "infographic"
+  | "document"
+  | "pdf"
+  | "screenshot"
+  | "other";
+
+export type AssetDiscoveryDecision =
+  | "pending"
+  | "accepted"
+  | "rejected"
+  | "replaced";
+
 export type StoryPriority = "low" | "normal" | "high" | "urgent";
 
 export type MediaFileType =
@@ -2463,6 +2501,216 @@ export type Database = {
         };
         Relationships: [];
       };
+      story_asset_discovery_runs: {
+        Row: {
+          id: string;
+          organization_id: string;
+          story_id: string;
+          status: AssetDiscoveryRunStatus;
+          panel_count: number;
+          preferred_provider: AssetDiscoveryProvider | null;
+          ai_metadata: Json;
+          history: Json;
+          error: string | null;
+          started_at: string | null;
+          completed_at: string | null;
+          created_by: string;
+          updated_by: string | null;
+          created_at: string;
+          updated_at: string;
+          deleted_at: string | null;
+        };
+        Insert: {
+          id?: string;
+          organization_id: string;
+          story_id: string;
+          status?: AssetDiscoveryRunStatus;
+          panel_count?: number;
+          preferred_provider?: AssetDiscoveryProvider | null;
+          ai_metadata?: Json;
+          history?: Json;
+          error?: string | null;
+          started_at?: string | null;
+          completed_at?: string | null;
+          created_by: string;
+          updated_by?: string | null;
+          created_at?: string;
+          updated_at?: string;
+          deleted_at?: string | null;
+        };
+        Update: {
+          id?: string;
+          organization_id?: string;
+          story_id?: string;
+          status?: AssetDiscoveryRunStatus;
+          panel_count?: number;
+          preferred_provider?: AssetDiscoveryProvider | null;
+          ai_metadata?: Json;
+          history?: Json;
+          error?: string | null;
+          started_at?: string | null;
+          completed_at?: string | null;
+          created_by?: string;
+          updated_by?: string | null;
+          created_at?: string;
+          updated_at?: string;
+          deleted_at?: string | null;
+        };
+        Relationships: [];
+      };
+      story_panel_asset_searches: {
+        Row: {
+          id: string;
+          organization_id: string;
+          story_id: string;
+          run_id: string;
+          panel_index: number;
+          scene_headline: string;
+          story_headline: string;
+          keywords: Json;
+          expanded_keywords: Json;
+          queries: Json;
+          providers_queried: string[];
+          context: Json;
+          created_by: string;
+          created_at: string;
+        };
+        Insert: {
+          id?: string;
+          organization_id: string;
+          story_id: string;
+          run_id: string;
+          panel_index: number;
+          scene_headline?: string;
+          story_headline?: string;
+          keywords?: Json;
+          expanded_keywords?: Json;
+          queries?: Json;
+          providers_queried?: string[];
+          context?: Json;
+          created_by: string;
+          created_at?: string;
+        };
+        Update: {
+          id?: string;
+          organization_id?: string;
+          story_id?: string;
+          run_id?: string;
+          panel_index?: number;
+          scene_headline?: string;
+          story_headline?: string;
+          keywords?: Json;
+          expanded_keywords?: Json;
+          queries?: Json;
+          providers_queried?: string[];
+          context?: Json;
+          created_by?: string;
+          created_at?: string;
+        };
+        Relationships: [];
+      };
+      story_panel_asset_candidates: {
+        Row: {
+          id: string;
+          organization_id: string;
+          story_id: string;
+          run_id: string;
+          search_id: string | null;
+          panel_index: number;
+          provider: AssetDiscoveryProvider;
+          provider_asset_id: string | null;
+          media_asset_id: string | null;
+          asset_kind: AssetDiscoveryKind;
+          title: string;
+          thumbnail_url: string | null;
+          preview_url: string | null;
+          source_url: string | null;
+          license_info: string;
+          resolution: string;
+          aspect_ratio: string;
+          orientation: string;
+          relevance_score: number;
+          confidence: number;
+          rank: number;
+          status: AssetDiscoveryDecision;
+          decided_by: string | null;
+          decided_at: string | null;
+          decision_note: string | null;
+          metadata: Json;
+          created_by: string;
+          updated_by: string | null;
+          created_at: string;
+          updated_at: string;
+          deleted_at: string | null;
+        };
+        Insert: {
+          id?: string;
+          organization_id: string;
+          story_id: string;
+          run_id: string;
+          search_id?: string | null;
+          panel_index: number;
+          provider: AssetDiscoveryProvider;
+          provider_asset_id?: string | null;
+          media_asset_id?: string | null;
+          asset_kind?: AssetDiscoveryKind;
+          title?: string;
+          thumbnail_url?: string | null;
+          preview_url?: string | null;
+          source_url?: string | null;
+          license_info?: string;
+          resolution?: string;
+          aspect_ratio?: string;
+          orientation?: string;
+          relevance_score?: number;
+          confidence?: number;
+          rank?: number;
+          status?: AssetDiscoveryDecision;
+          decided_by?: string | null;
+          decided_at?: string | null;
+          decision_note?: string | null;
+          metadata?: Json;
+          created_by: string;
+          updated_by?: string | null;
+          created_at?: string;
+          updated_at?: string;
+          deleted_at?: string | null;
+        };
+        Update: {
+          id?: string;
+          organization_id?: string;
+          story_id?: string;
+          run_id?: string;
+          search_id?: string | null;
+          panel_index?: number;
+          provider?: AssetDiscoveryProvider;
+          provider_asset_id?: string | null;
+          media_asset_id?: string | null;
+          asset_kind?: AssetDiscoveryKind;
+          title?: string;
+          thumbnail_url?: string | null;
+          preview_url?: string | null;
+          source_url?: string | null;
+          license_info?: string;
+          resolution?: string;
+          aspect_ratio?: string;
+          orientation?: string;
+          relevance_score?: number;
+          confidence?: number;
+          rank?: number;
+          status?: AssetDiscoveryDecision;
+          decided_by?: string | null;
+          decided_at?: string | null;
+          decision_note?: string | null;
+          metadata?: Json;
+          created_by?: string;
+          updated_by?: string | null;
+          created_at?: string;
+          updated_at?: string;
+          deleted_at?: string | null;
+        };
+        Relationships: [];
+      };
     };
     Views: Record<string, never>;
     Functions: {
@@ -2497,6 +2745,10 @@ export type Database = {
       story_voice_status: StoryVoiceStatus;
       story_package_status: StoryPackageStatus;
       story_scene_instance_status: StorySceneInstanceStatus;
+      asset_discovery_run_status: AssetDiscoveryRunStatus;
+      asset_discovery_provider: AssetDiscoveryProvider;
+      asset_discovery_kind: AssetDiscoveryKind;
+      asset_discovery_decision: AssetDiscoveryDecision;
       story_priority: StoryPriority;
       media_file_type: MediaFileType;
       media_storage_scope: MediaStorageScope;
