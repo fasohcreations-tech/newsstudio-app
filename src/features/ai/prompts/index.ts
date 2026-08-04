@@ -33,6 +33,10 @@ import {
   voiceGeminiStylePrompt,
 } from "@/features/ai/prompts/intelligence";
 import {
+  visionAnalyzeVideoPrompt,
+  visionRecommendClipPrompt,
+} from "@/features/ai/prompts/vision";
+import {
   aiPlaygroundPrompt,
   newsMalayalamDeskSystemPrompt,
 } from "@/features/ai/prompts/system";
@@ -62,6 +66,8 @@ export const PROMPT_CATALOG: PromptTemplate[] = [
   mediaSubHeadlineImagePrompt,
   discoveryExpandKeywordsPrompt,
   discoveryWebSearchQueryPrompt,
+  visionAnalyzeVideoPrompt,
+  visionRecommendClipPrompt,
   intelligenceStoryPrompt,
   intelligenceTimelinePrompt,
   intelligenceScenePrompt,

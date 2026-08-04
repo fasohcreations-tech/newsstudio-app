@@ -82,6 +82,59 @@ export type AssetDiscoveryDecision =
   | "rejected"
   | "replaced";
 
+export type StoryTimelineStatus =
+  | "draft"
+  | "assembling"
+  | "ready"
+  | "editing"
+  | "locked"
+  | "archived";
+
+export type StoryTimelineTrackKind =
+  | "scene"
+  | "voice"
+  | "music"
+  | "graphics"
+  | "ticker"
+  | "advertisement"
+  | "other";
+
+export type StoryTimelineTransitionType =
+  | "cut"
+  | "fade"
+  | "cross_dissolve"
+  | "slide"
+  | "push"
+  | "wipe"
+  | "broadcast_reveal";
+
+export type VisualAnalysisStatus =
+  | "queued"
+  | "running"
+  | "ready"
+  | "failed"
+  | "stale";
+
+export type VisualEventKind =
+  | "scene_boundary"
+  | "shot_change"
+  | "keyframe"
+  | "speech"
+  | "ocr"
+  | "face"
+  | "object"
+  | "logo"
+  | "landmark"
+  | "location"
+  | "action"
+  | "keyword";
+
+export type ClipSuggestionDecision =
+  | "pending"
+  | "accepted"
+  | "rejected"
+  | "superseded";
+
 export type StoryPriority = "low" | "normal" | "high" | "urgent";
 
 export type MediaFileType =
@@ -752,6 +805,8 @@ export type Database = {
           height: number | null;
           duration_seconds: number | null;
           checksum: string | null;
+          external_url: string | null;
+          source_provider: string | null;
           created_by: string;
           updated_by: string | null;
           created_at: string;
@@ -773,6 +828,8 @@ export type Database = {
           height?: number | null;
           duration_seconds?: number | null;
           checksum?: string | null;
+          external_url?: string | null;
+          source_provider?: string | null;
           created_by: string;
           updated_by?: string | null;
           created_at?: string;
@@ -794,6 +851,8 @@ export type Database = {
           height?: number | null;
           duration_seconds?: number | null;
           checksum?: string | null;
+          external_url?: string | null;
+          source_provider?: string | null;
           created_by?: string;
           updated_by?: string | null;
           created_at?: string;
@@ -813,6 +872,158 @@ export type Database = {
             columns: ["folder_id"];
             isOneToOne: false;
             referencedRelation: "media_folders";
+            referencedColumns: ["id"];
+          },
+        ];
+      };
+      media_asset_clips: {
+        Row: {
+          id: string;
+          organization_id: string;
+          parent_asset_id: string;
+          name: string;
+          notes: string | null;
+          tags: string[];
+          in_point_ms: number;
+          out_point_ms: number;
+          duration_ms: number;
+          frame_rate: number;
+          width: number | null;
+          height: number | null;
+          thumbnail_url: string | null;
+          poster_storage_bucket: MediaStorageScope | null;
+          poster_storage_path: string | null;
+          proxy_storage_bucket: MediaStorageScope | null;
+          proxy_storage_path: string | null;
+          audio_extracted: boolean;
+          metadata: Record<string, unknown>;
+          created_by: string;
+          updated_by: string | null;
+          created_at: string;
+          updated_at: string;
+          deleted_at: string | null;
+        };
+        Insert: {
+          id?: string;
+          organization_id: string;
+          parent_asset_id: string;
+          name: string;
+          notes?: string | null;
+          tags?: string[];
+          in_point_ms: number;
+          out_point_ms: number;
+          duration_ms: number;
+          frame_rate?: number;
+          width?: number | null;
+          height?: number | null;
+          thumbnail_url?: string | null;
+          poster_storage_bucket?: MediaStorageScope | null;
+          poster_storage_path?: string | null;
+          proxy_storage_bucket?: MediaStorageScope | null;
+          proxy_storage_path?: string | null;
+          audio_extracted?: boolean;
+          metadata?: Record<string, unknown>;
+          created_by: string;
+          updated_by?: string | null;
+          created_at?: string;
+          updated_at?: string;
+          deleted_at?: string | null;
+        };
+        Update: {
+          id?: string;
+          organization_id?: string;
+          parent_asset_id?: string;
+          name?: string;
+          notes?: string | null;
+          tags?: string[];
+          in_point_ms?: number;
+          out_point_ms?: number;
+          duration_ms?: number;
+          frame_rate?: number;
+          width?: number | null;
+          height?: number | null;
+          thumbnail_url?: string | null;
+          poster_storage_bucket?: MediaStorageScope | null;
+          poster_storage_path?: string | null;
+          proxy_storage_bucket?: MediaStorageScope | null;
+          proxy_storage_path?: string | null;
+          audio_extracted?: boolean;
+          metadata?: Record<string, unknown>;
+          created_by?: string;
+          updated_by?: string | null;
+          created_at?: string;
+          updated_at?: string;
+          deleted_at?: string | null;
+        };
+        Relationships: [
+          {
+            foreignKeyName: "media_asset_clips_organization_id_fkey";
+            columns: ["organization_id"];
+            isOneToOne: false;
+            referencedRelation: "organizations";
+            referencedColumns: ["id"];
+          },
+          {
+            foreignKeyName: "media_asset_clips_parent_asset_id_fkey";
+            columns: ["parent_asset_id"];
+            isOneToOne: false;
+            referencedRelation: "media_assets";
+            referencedColumns: ["id"];
+          },
+        ];
+      };
+      clip_thumbnails: {
+        Row: {
+          id: string;
+          organization_id: string;
+          clip_id: string;
+          kind: string;
+          timecode_ms: number;
+          storage_bucket: MediaStorageScope | null;
+          storage_path: string | null;
+          public_url: string | null;
+          width: number | null;
+          height: number | null;
+          is_primary: boolean;
+          created_by: string | null;
+          created_at: string;
+        };
+        Insert: {
+          id?: string;
+          organization_id: string;
+          clip_id: string;
+          kind?: string;
+          timecode_ms?: number;
+          storage_bucket?: MediaStorageScope | null;
+          storage_path?: string | null;
+          public_url?: string | null;
+          width?: number | null;
+          height?: number | null;
+          is_primary?: boolean;
+          created_by?: string | null;
+          created_at?: string;
+        };
+        Update: {
+          id?: string;
+          organization_id?: string;
+          clip_id?: string;
+          kind?: string;
+          timecode_ms?: number;
+          storage_bucket?: MediaStorageScope | null;
+          storage_path?: string | null;
+          public_url?: string | null;
+          width?: number | null;
+          height?: number | null;
+          is_primary?: boolean;
+          created_by?: string | null;
+          created_at?: string;
+        };
+        Relationships: [
+          {
+            foreignKeyName: "clip_thumbnails_clip_id_fkey";
+            columns: ["clip_id"];
+            isOneToOne: false;
+            referencedRelation: "media_asset_clips";
             referencedColumns: ["id"];
           },
         ];
@@ -2711,6 +2922,480 @@ export type Database = {
         };
         Relationships: [];
       };
+      media_asset_analyses: {
+        Row: {
+          id: string;
+          organization_id: string;
+          media_asset_id: string;
+          status: VisualAnalysisStatus;
+          source_provider: string | null;
+          source_url: string | null;
+          duration_ms: number | null;
+          frame_rate: number | null;
+          transcript: string | null;
+          keywords: Json;
+          summary: string | null;
+          semantic_payload: Json;
+          model_version: string | null;
+          ai_job_id: string | null;
+          error: string | null;
+          analyzed_at: string | null;
+          created_by: string;
+          updated_by: string | null;
+          created_at: string;
+          updated_at: string;
+          deleted_at: string | null;
+        };
+        Insert: {
+          id?: string;
+          organization_id: string;
+          media_asset_id: string;
+          status?: VisualAnalysisStatus;
+          source_provider?: string | null;
+          source_url?: string | null;
+          duration_ms?: number | null;
+          frame_rate?: number | null;
+          transcript?: string | null;
+          keywords?: Json;
+          summary?: string | null;
+          semantic_payload?: Json;
+          model_version?: string | null;
+          ai_job_id?: string | null;
+          error?: string | null;
+          analyzed_at?: string | null;
+          created_by: string;
+          updated_by?: string | null;
+          created_at?: string;
+          updated_at?: string;
+          deleted_at?: string | null;
+        };
+        Update: {
+          id?: string;
+          organization_id?: string;
+          media_asset_id?: string;
+          status?: VisualAnalysisStatus;
+          source_provider?: string | null;
+          source_url?: string | null;
+          duration_ms?: number | null;
+          frame_rate?: number | null;
+          transcript?: string | null;
+          keywords?: Json;
+          summary?: string | null;
+          semantic_payload?: Json;
+          model_version?: string | null;
+          ai_job_id?: string | null;
+          error?: string | null;
+          analyzed_at?: string | null;
+          created_by?: string;
+          updated_by?: string | null;
+          created_at?: string;
+          updated_at?: string;
+          deleted_at?: string | null;
+        };
+        Relationships: [];
+      };
+      media_asset_analysis_events: {
+        Row: {
+          id: string;
+          organization_id: string;
+          analysis_id: string;
+          media_asset_id: string;
+          kind: VisualEventKind;
+          start_ms: number;
+          end_ms: number;
+          label: string;
+          confidence: number | null;
+          payload: Json;
+          created_at: string;
+        };
+        Insert: {
+          id?: string;
+          organization_id: string;
+          analysis_id: string;
+          media_asset_id: string;
+          kind: VisualEventKind;
+          start_ms: number;
+          end_ms: number;
+          label?: string;
+          confidence?: number | null;
+          payload?: Json;
+          created_at?: string;
+        };
+        Update: {
+          id?: string;
+          organization_id?: string;
+          analysis_id?: string;
+          media_asset_id?: string;
+          kind?: VisualEventKind;
+          start_ms?: number;
+          end_ms?: number;
+          label?: string;
+          confidence?: number | null;
+          payload?: Json;
+          created_at?: string;
+        };
+        Relationships: [];
+      };
+      media_asset_embeddings: {
+        Row: {
+          id: string;
+          organization_id: string;
+          analysis_id: string;
+          media_asset_id: string;
+          segment_index: number;
+          start_ms: number;
+          end_ms: number;
+          text_content: string;
+          embedding: Json;
+          model_version: string | null;
+          created_at: string;
+        };
+        Insert: {
+          id?: string;
+          organization_id: string;
+          analysis_id: string;
+          media_asset_id: string;
+          segment_index: number;
+          start_ms: number;
+          end_ms: number;
+          text_content?: string;
+          embedding?: Json;
+          model_version?: string | null;
+          created_at?: string;
+        };
+        Update: {
+          id?: string;
+          organization_id?: string;
+          analysis_id?: string;
+          media_asset_id?: string;
+          segment_index?: number;
+          start_ms?: number;
+          end_ms?: number;
+          text_content?: string;
+          embedding?: Json;
+          model_version?: string | null;
+          created_at?: string;
+        };
+        Relationships: [];
+      };
+      story_panel_clip_suggestions: {
+        Row: {
+          id: string;
+          organization_id: string;
+          story_id: string;
+          panel_index: number;
+          media_asset_id: string;
+          analysis_id: string | null;
+          suggested_in_ms: number;
+          suggested_out_ms: number;
+          confidence: number;
+          reason: string;
+          decision: ClipSuggestionDecision;
+          accepted_clip_id: string | null;
+          scene_headline: string;
+          story_headline: string;
+          keywords: Json;
+          voice_duration_ms: number | null;
+          context: Json;
+          model_version: string | null;
+          ai_job_id: string | null;
+          created_by: string;
+          decided_by: string | null;
+          decided_at: string | null;
+          created_at: string;
+          updated_at: string;
+        };
+        Insert: {
+          id?: string;
+          organization_id: string;
+          story_id: string;
+          panel_index: number;
+          media_asset_id: string;
+          analysis_id?: string | null;
+          suggested_in_ms: number;
+          suggested_out_ms: number;
+          confidence?: number;
+          reason?: string;
+          decision?: ClipSuggestionDecision;
+          accepted_clip_id?: string | null;
+          scene_headline?: string;
+          story_headline?: string;
+          keywords?: Json;
+          voice_duration_ms?: number | null;
+          context?: Json;
+          model_version?: string | null;
+          ai_job_id?: string | null;
+          created_by: string;
+          decided_by?: string | null;
+          decided_at?: string | null;
+          created_at?: string;
+          updated_at?: string;
+        };
+        Update: {
+          id?: string;
+          organization_id?: string;
+          story_id?: string;
+          panel_index?: number;
+          media_asset_id?: string;
+          analysis_id?: string | null;
+          suggested_in_ms?: number;
+          suggested_out_ms?: number;
+          confidence?: number;
+          reason?: string;
+          decision?: ClipSuggestionDecision;
+          accepted_clip_id?: string | null;
+          scene_headline?: string;
+          story_headline?: string;
+          keywords?: Json;
+          voice_duration_ms?: number | null;
+          context?: Json;
+          model_version?: string | null;
+          ai_job_id?: string | null;
+          created_by?: string;
+          decided_by?: string | null;
+          decided_at?: string | null;
+          created_at?: string;
+          updated_at?: string;
+        };
+        Relationships: [];
+      };
+      story_timelines: {
+        Row: {
+          id: string;
+          organization_id: string;
+          story_id: string;
+          package_id: string | null;
+          title: string;
+          status: StoryTimelineStatus;
+          duration_ms: number;
+          resolution_width: number;
+          resolution_height: number;
+          frame_rate: number;
+          aspect_ratio: string;
+          metadata: Json;
+          assembled_at: string | null;
+          assembled_by: string | null;
+          created_by: string;
+          updated_by: string | null;
+          created_at: string;
+          updated_at: string;
+          deleted_at: string | null;
+        };
+        Insert: {
+          id?: string;
+          organization_id: string;
+          story_id: string;
+          package_id?: string | null;
+          title?: string;
+          status?: StoryTimelineStatus;
+          duration_ms?: number;
+          resolution_width?: number;
+          resolution_height?: number;
+          frame_rate?: number;
+          aspect_ratio?: string;
+          metadata?: Json;
+          assembled_at?: string | null;
+          assembled_by?: string | null;
+          created_by: string;
+          updated_by?: string | null;
+          created_at?: string;
+          updated_at?: string;
+          deleted_at?: string | null;
+        };
+        Update: {
+          id?: string;
+          organization_id?: string;
+          story_id?: string;
+          package_id?: string | null;
+          title?: string;
+          status?: StoryTimelineStatus;
+          duration_ms?: number;
+          resolution_width?: number;
+          resolution_height?: number;
+          frame_rate?: number;
+          aspect_ratio?: string;
+          metadata?: Json;
+          assembled_at?: string | null;
+          assembled_by?: string | null;
+          created_by?: string;
+          updated_by?: string | null;
+          created_at?: string;
+          updated_at?: string;
+          deleted_at?: string | null;
+        };
+        Relationships: [];
+      };
+      story_timeline_tracks: {
+        Row: {
+          id: string;
+          organization_id: string;
+          timeline_id: string;
+          kind: StoryTimelineTrackKind;
+          name: string;
+          sort_order: number;
+          height: number;
+          color: string | null;
+          muted: boolean;
+          locked: boolean;
+          visible: boolean;
+          metadata: Json;
+          created_at: string;
+          updated_at: string;
+        };
+        Insert: {
+          id?: string;
+          organization_id: string;
+          timeline_id: string;
+          kind: StoryTimelineTrackKind;
+          name: string;
+          sort_order?: number;
+          height?: number;
+          color?: string | null;
+          muted?: boolean;
+          locked?: boolean;
+          visible?: boolean;
+          metadata?: Json;
+          created_at?: string;
+          updated_at?: string;
+        };
+        Update: {
+          id?: string;
+          organization_id?: string;
+          timeline_id?: string;
+          kind?: StoryTimelineTrackKind;
+          name?: string;
+          sort_order?: number;
+          height?: number;
+          color?: string | null;
+          muted?: boolean;
+          locked?: boolean;
+          visible?: boolean;
+          metadata?: Json;
+          created_at?: string;
+          updated_at?: string;
+        };
+        Relationships: [];
+      };
+      story_timeline_clips: {
+        Row: {
+          id: string;
+          organization_id: string;
+          timeline_id: string;
+          track_id: string;
+          scene_instance_id: string | null;
+          voice_segment_id: string | null;
+          name: string;
+          start_ms: number;
+          end_ms: number;
+          duration_ms: number;
+          trim_in_ms: number;
+          trim_out_ms: number | null;
+          enabled: boolean;
+          locked: boolean;
+          visible: boolean;
+          sort_order: number;
+          scene_synced_at: string | null;
+          scene_revision: string | null;
+          metadata: Json;
+          created_by: string;
+          updated_by: string | null;
+          created_at: string;
+          updated_at: string;
+          deleted_at: string | null;
+        };
+        Insert: {
+          id?: string;
+          organization_id: string;
+          timeline_id: string;
+          track_id: string;
+          scene_instance_id?: string | null;
+          voice_segment_id?: string | null;
+          name?: string;
+          start_ms: number;
+          end_ms: number;
+          duration_ms: number;
+          trim_in_ms?: number;
+          trim_out_ms?: number | null;
+          enabled?: boolean;
+          locked?: boolean;
+          visible?: boolean;
+          sort_order?: number;
+          scene_synced_at?: string | null;
+          scene_revision?: string | null;
+          metadata?: Json;
+          created_by: string;
+          updated_by?: string | null;
+          created_at?: string;
+          updated_at?: string;
+          deleted_at?: string | null;
+        };
+        Update: {
+          id?: string;
+          organization_id?: string;
+          timeline_id?: string;
+          track_id?: string;
+          scene_instance_id?: string | null;
+          voice_segment_id?: string | null;
+          name?: string;
+          start_ms?: number;
+          end_ms?: number;
+          duration_ms?: number;
+          trim_in_ms?: number;
+          trim_out_ms?: number | null;
+          enabled?: boolean;
+          locked?: boolean;
+          visible?: boolean;
+          sort_order?: number;
+          scene_synced_at?: string | null;
+          scene_revision?: string | null;
+          metadata?: Json;
+          created_by?: string;
+          updated_by?: string | null;
+          created_at?: string;
+          updated_at?: string;
+          deleted_at?: string | null;
+        };
+        Relationships: [];
+      };
+      story_timeline_transitions: {
+        Row: {
+          id: string;
+          organization_id: string;
+          timeline_id: string;
+          from_clip_id: string;
+          to_clip_id: string;
+          transition_type: StoryTimelineTransitionType;
+          duration_ms: number;
+          parameters: Json;
+          created_at: string;
+          updated_at: string;
+        };
+        Insert: {
+          id?: string;
+          organization_id: string;
+          timeline_id: string;
+          from_clip_id: string;
+          to_clip_id: string;
+          transition_type?: StoryTimelineTransitionType;
+          duration_ms?: number;
+          parameters?: Json;
+          created_at?: string;
+          updated_at?: string;
+        };
+        Update: {
+          id?: string;
+          organization_id?: string;
+          timeline_id?: string;
+          from_clip_id?: string;
+          to_clip_id?: string;
+          transition_type?: StoryTimelineTransitionType;
+          duration_ms?: number;
+          parameters?: Json;
+          created_at?: string;
+          updated_at?: string;
+        };
+        Relationships: [];
+      };
     };
     Views: Record<string, never>;
     Functions: {
@@ -2749,6 +3434,12 @@ export type Database = {
       asset_discovery_provider: AssetDiscoveryProvider;
       asset_discovery_kind: AssetDiscoveryKind;
       asset_discovery_decision: AssetDiscoveryDecision;
+      visual_analysis_status: VisualAnalysisStatus;
+      visual_event_kind: VisualEventKind;
+      clip_suggestion_decision: ClipSuggestionDecision;
+      story_timeline_status: StoryTimelineStatus;
+      story_timeline_track_kind: StoryTimelineTrackKind;
+      story_timeline_transition_type: StoryTimelineTransitionType;
       story_priority: StoryPriority;
       media_file_type: MediaFileType;
       media_storage_scope: MediaStorageScope;

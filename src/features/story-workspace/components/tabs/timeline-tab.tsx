@@ -2,9 +2,8 @@
 
 import Link from "next/link";
 import { useRouter } from "next/navigation";
-import { useState, useTransition } from "react";
+import { useState } from "react";
 import { Clapperboard, ExternalLink, Plus } from "lucide-react";
-import { toast } from "sonner";
 
 import { Button } from "@/components/ui/button";
 import {
@@ -18,6 +17,7 @@ import { Badge } from "@/components/ui/badge";
 import { CreateProjectDialog } from "@/features/creative-studio/components/dialogs/create-project-dialog";
 import type { CreativeProject } from "@/features/creative-studio/types/creative-studio.types";
 import { RelativeTime } from "@/features/newsroom/components/relative-time";
+import { StoryTimelineAssemblyWorkspace } from "@/features/story-timeline-assembly/components/story-timeline-assembly-workspace";
 
 type TimelineTabProps = {
   storyId: string;
@@ -26,6 +26,11 @@ type TimelineTabProps = {
   initialProjects: CreativeProject[];
 };
 
+/**
+ * Story Workspace Timeline tab.
+ * Primary: Production Timeline Assembly (Step 3).
+ * Secondary: optional Creative Studio project (manual polish — unchanged).
+ */
 export function TimelineTab({
   storyId,
   storyTitle,
@@ -35,39 +40,45 @@ export function TimelineTab({
   const router = useRouter();
   const [projects, setProjects] = useState(initialProjects);
   const [createOpen, setCreateOpen] = useState(false);
-  const [pending, startTransition] = useTransition();
-
-  const openOrCreate = () => {
-    if (projects.length > 0) {
-      router.push(`/creative-studio/projects/${projects[0].id}`);
-      return;
-    }
-    setCreateOpen(true);
-  };
 
   return (
     <div className="space-y-5">
+      <StoryTimelineAssemblyWorkspace
+        storyId={storyId}
+        storyTitle={storyTitle}
+      />
+
       <Card className="border-border/60">
         <CardHeader>
           <div className="flex flex-wrap items-start justify-between gap-3">
             <div>
               <CardTitle className="flex items-center gap-2 text-lg">
                 <Clapperboard className="size-5" />
-                Creative Studio Timeline
+                Creative Studio (optional)
               </CardTitle>
               <CardDescription>
-                Edit packages for <strong>{storyTitle}</strong> in the full
-                desktop timeline workspace.
+                Open a Creative Studio project for manual polish. Production
+                Timeline Assembly above does not redesign Studio.
               </CardDescription>
             </div>
             <div className="flex flex-wrap gap-2">
-              <Button type="button" onClick={openOrCreate} disabled={pending}>
+              <Button
+                type="button"
+                variant="outline"
+                onClick={() => {
+                  if (projects[0]) {
+                    router.push(`/creative-studio/projects/${projects[0].id}`);
+                    return;
+                  }
+                  setCreateOpen(true);
+                }}
+              >
                 <ExternalLink className="size-4" />
                 {projects.length > 0 ? "Open Studio" : "Create Project"}
               </Button>
               <Button
                 type="button"
-                variant="outline"
+                variant="ghost"
                 onClick={() => setCreateOpen(true)}
               >
                 <Plus className="size-4" />
@@ -79,8 +90,7 @@ export function TimelineTab({
         <CardContent>
           {projects.length === 0 ? (
             <p className="text-sm text-muted-foreground">
-              No story-linked Creative Studio projects yet. Create one to start
-              building the timeline package.
+              No story-linked Creative Studio projects yet.
             </p>
           ) : (
             <ul className="space-y-2">

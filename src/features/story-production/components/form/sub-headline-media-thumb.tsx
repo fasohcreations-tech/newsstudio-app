@@ -4,6 +4,7 @@ import { useEffect, useState } from "react";
 import { ImageIcon, Loader2, Type, Video } from "lucide-react";
 
 import { createSignedAssetUrl } from "@/features/media/services/media.service";
+import { parseClipMediaRef } from "@/features/asset-clip-editor/lib/clip-media-reference";
 import { parseLibraryMediaRef } from "@/features/story-production/lib/library-media-reference";
 import type { SubHeadlineMediaKind } from "@/features/story-production/lib/sub-headlines";
 import { createClient } from "@/shared/lib/supabase/client";
@@ -27,7 +28,7 @@ function isDirectPreviewUrl(value: string): boolean {
 }
 
 /**
- * Thumbnail for a Sub Headline media ref (`library://…` or direct URL).
+ * Thumbnail for a Sub Headline media ref (`library://…`, `clip://…`, or URL).
  */
 export function SubHeadlineMediaThumb({
   kind,
@@ -57,8 +58,9 @@ export function SubHeadlineMediaThumb({
       return;
     }
 
+    const clipId = parseClipMediaRef(ref);
     const assetId = parseLibraryMediaRef(ref);
-    if (!assetId) {
+    if (!clipId && !assetId) {
       setUrl(null);
       setLoading(false);
       setFailed(true);
@@ -70,33 +72,86 @@ export function SubHeadlineMediaThumb({
 
     void (async () => {
       const supabase = createClient();
+
+      if (clipId) {
+        const { data: clip } = await supabase
+          .from("media_asset_clips")
+          .select(
+            "id, thumbnail_url, parent:media_assets!media_asset_clips_parent_asset_id_fkey(id, storage_bucket, storage_path, external_url, file_type)",
+          )
+          .eq("id", clipId)
+          .is("deleted_at", null)
+          .maybeSingle();
+
+        if (cancelled) return;
+        if (clip?.thumbnail_url) {
+          setUrl(clip.thumbnail_url);
+          setLoading(false);
+          return;
+        }
+        const parentRaw = clip?.parent as
+          | {
+              storage_bucket: string;
+              storage_path: string;
+              external_url: string | null;
+            }
+          | {
+              storage_bucket: string;
+              storage_path: string;
+              external_url: string | null;
+            }[]
+          | null
+          | undefined;
+        const parent = Array.isArray(parentRaw) ? parentRaw[0] : parentRaw;
+        if (!parent) {
+          setFailed(true);
+          setLoading(false);
+          return;
+        }
+        if (parent.external_url) {
+          setUrl(parent.external_url);
+          setLoading(false);
+          return;
+        }
+        const { url: signed } = await createSignedAssetUrl(
+          supabase,
+          parent.storage_bucket,
+          parent.storage_path,
+        );
+        if (cancelled) return;
+        setUrl(signed);
+        setFailed(!signed);
+        setLoading(false);
+        return;
+      }
+
       const { data: asset, error } = await supabase
         .from("media_assets")
-        .select("id, storage_bucket, storage_path, file_type")
-        .eq("id", assetId)
+        .select("id, storage_bucket, storage_path, file_type, external_url")
+        .eq("id", assetId!)
         .is("deleted_at", null)
         .maybeSingle();
 
       if (cancelled) return;
-
       if (error || !asset) {
-        setUrl(null);
-        setLoading(false);
         setFailed(true);
+        setLoading(false);
         return;
       }
-
+      if (asset.external_url) {
+        setUrl(asset.external_url);
+        setLoading(false);
+        return;
+      }
       const { url: signed } = await createSignedAssetUrl(
         supabase,
         asset.storage_bucket,
         asset.storage_path,
-        60 * 60,
       );
-
       if (cancelled) return;
       setUrl(signed);
-      setLoading(false);
       setFailed(!signed);
+      setLoading(false);
     })();
 
     return () => {

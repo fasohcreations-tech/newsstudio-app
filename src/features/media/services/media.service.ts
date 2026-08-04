@@ -32,6 +32,8 @@ const ASSET_SELECT = `
   height,
   duration_seconds,
   checksum,
+  external_url,
+  source_provider,
   created_by,
   updated_by,
   created_at,

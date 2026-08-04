@@ -42,7 +42,9 @@ Approved Story → Generated Voice → Analyze into Story Panels
   → Store Story Package (scenes + voice segments + AI metadata)
 ```
 
-Timeline generation is **out of scope** for this step.
+Timeline generation is **out of scope** for this step — see
+`docs/story-production/timeline-assembly.md` (Pipeline Step 3).
+
 
 ## Data model
 

@@ -20,7 +20,7 @@ export function MediaDropzone({ disabled, onFiles }: MediaDropzoneProps) {
         <h3 className="text-base font-medium">Upload media assets</h3>
         <p className="max-w-sm text-sm text-muted-foreground">
           Drag and drop images, video, audio, PDF, Word, or text files here — or
-          choose files to upload.
+          choose files to upload (max 250MB each).
         </p>
       </div>
       <label>

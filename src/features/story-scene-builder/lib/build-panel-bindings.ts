@@ -269,6 +269,7 @@ export function buildPanelSceneBindings(
 ): Record<string, string> {
   const panelHeadline = input.panelSubheadline.trim();
   const imageRef = input.mediaKind === "image" ? input.mediaRef.trim() : "";
+  // Prefer clip:// when Story Panel attached an Asset Clip (Module 2.5).
   const videoRef = input.mediaKind === "video" ? input.mediaRef.trim() : "";
   const caption = input.mediaCaption.trim();
   const mainMedia = videoRef || imageRef;
@@ -318,6 +319,7 @@ export function panelToStoryData(
   input: BuildPanelSceneBindingsInput,
 ): StoryDataRecord {
   const imageRef = input.mediaKind === "image" ? input.mediaRef.trim() : "";
+  // Prefer clip:// when Story Panel attached an Asset Clip (Module 2.5).
   const videoRef = input.mediaKind === "video" ? input.mediaRef.trim() : "";
   const mainMedia = videoRef || imageRef;
   const panelHeadline = input.panelSubheadline.trim();

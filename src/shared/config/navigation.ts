@@ -48,7 +48,7 @@ export const APP_NAV_ITEMS: AppNavItem[] = [
     title: "Media Library",
     href: "/media-library",
     icon: Library,
-    description: "Assets, footage, and brand media",
+    description: "Assets, footage, clips, and brand media",
   },
   {
     title: "Creative Studio",

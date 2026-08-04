@@ -45,4 +45,7 @@ export const MEDIA_ACCEPT = [
   "text/markdown",
 ].join(",");
 
-export const MAX_UPLOAD_BYTES = 500 * 1024 * 1024;
+export const MAX_UPLOAD_BYTES = 250 * 1024 * 1024;
+
+export const MAX_UPLOAD_LABEL = "250MB";
+

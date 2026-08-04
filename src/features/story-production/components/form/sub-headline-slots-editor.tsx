@@ -5,6 +5,7 @@ import {
   FolderOpen,
   ImageIcon,
   Loader2,
+  Scissors,
   Search,
   Sparkles,
   Trash2,
@@ -29,10 +30,14 @@ import {
 } from "@/features/ai-asset-discovery/actions/discovery.actions";
 import type { WebMediaHit } from "@/features/ai-asset-discovery/services/web-media-search.service";
 import { generateProducerMediaAction } from "@/features/ai-news-producer/actions/producer-media.actions";
+import { parseClipMediaRef } from "@/features/asset-clip-editor/lib/clip-media-reference";
 import { ManglishLineInput } from "@/features/smart-editor/components/manglish-line-input";
 import { SubHeadlineMediaThumb } from "@/features/story-production/components/form/sub-headline-media-thumb";
 import { ComposerMediaPicker } from "@/features/story-production/components/panels/composer-media-picker";
-import { toLibraryMediaRef } from "@/features/story-production/lib/library-media-reference";
+import {
+  parseLibraryMediaRef,
+  toLibraryMediaRef,
+} from "@/features/story-production/lib/library-media-reference";
 import type { StoryMediaTarget } from "@/features/story-production/lib/resolve-media-target";
 import {
   emptySubHeadlineMediaRef,
@@ -78,6 +83,9 @@ function mediaTargetForSlot(
 
 function shortRefLabel(ref: string): string {
   if (!ref) return "No media linked";
+  if (ref.startsWith("clip://")) {
+    return `Clip · ${ref.slice("clip://".length, "clip://".length + 8)}…`;
+  }
   if (ref.startsWith("library://")) {
     return `Library · ${ref.slice("library://".length, "library://".length + 8)}…`;
   }
@@ -261,7 +269,15 @@ export function SubHeadlineSlotsEditor({
     <div className="space-y-3">
       <p className="text-[11px] text-muted-foreground">
         For each Sub Headline, AI search stock + YouTube / Google / Facebook
-        (Find), then add or link media. Browse / generate remain available.
+        (Find), then add or link media. Use{" "}
+        <a
+          href="/media-library/clip-editor"
+          className="underline underline-offset-2"
+        >
+          Clip Editor
+        </a>{" "}
+        + AI Visual Understanding for IN/OUT clips (`clip://`), or Browse /
+        Generate.
       </p>
 
       <div className="grid gap-3 sm:grid-cols-2">
@@ -333,6 +349,28 @@ export function SubHeadlineSlotsEditor({
                   <FolderOpen className="size-3.5" />
                   Browse
                 </Button>
+                {storyId ? (
+                  <a
+                    href={(() => {
+                      const params = new URLSearchParams({
+                        storyId,
+                        panel: String(index),
+                      });
+                      const lib = parseLibraryMediaRef(slotMedia.ref);
+                      const clip = parseClipMediaRef(slotMedia.ref);
+                      if (lib) params.set("asset", lib);
+                      if (clip) params.set("clipId", clip);
+                      return `/media-library/clip-editor?${params.toString()}`;
+                    })()}
+                    className={cn(
+                      "inline-flex h-7 items-center justify-center gap-1.5 rounded-lg border border-border bg-background px-2.5 text-xs font-medium hover:bg-muted",
+                      disabled && "pointer-events-none opacity-50",
+                    )}
+                  >
+                    <Scissors className="size-3.5" />
+                    Suggest clip
+                  </a>
+                ) : null}
               </div>
 
               {slotSuggestions.length > 0 ? (

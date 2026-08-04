@@ -12,7 +12,7 @@ import {
   readImageDimensions,
   readMediaDuration,
 } from "@/features/media/lib/media-utils";
-import { MAX_UPLOAD_BYTES } from "@/features/media/constants/media.constants";
+import { MAX_UPLOAD_BYTES, MAX_UPLOAD_LABEL } from "@/features/media/constants/media.constants";
 import type { MediaAssetWithMeta } from "@/features/media/types/media.types";
 
 export type UploadProgress = {
@@ -29,6 +29,33 @@ type UploadFilesArgs = {
   storyId?: string | null;
   onProgress?: (items: UploadProgress[]) => void;
 };
+
+function formatFileMb(bytes: number): string {
+  return `${(bytes / (1024 * 1024)).toFixed(1)}MB`;
+}
+
+/**
+ * Supabase returns EntityTooLarge / "maximum allowed size" when the project
+ * global limit or bucket file_size_limit is below the file size (often still 50MB).
+ */
+function formatStorageUploadError(raw: string, fileBytes: number): string {
+  const lower = raw.toLowerCase();
+  if (
+    lower.includes("maximum allowed size") ||
+    lower.includes("entitytoolarge") ||
+    lower.includes("payload too large") ||
+    lower.includes("object exceeded") ||
+    lower.includes("file size")
+  ) {
+    return (
+      `Upload rejected by Supabase Storage (${formatFileMb(fileBytes)} file). ` +
+      `Raise the project global file size limit to at least ${MAX_UPLOAD_LABEL} under ` +
+      `Dashboard → Storage → Settings, then run migration 20260324000026 (bucket limits). ` +
+      `Free plans are capped at 50MB until upgraded.`
+    );
+  }
+  return raw;
+}
 
 export async function uploadMediaFiles({
   organizationId,
@@ -74,9 +101,9 @@ export async function uploadMediaFiles({
         filename: file.name,
         progress: 100,
         status: "error",
-        error: "File exceeds the 500MB limit.",
+        error: `File exceeds the ${MAX_UPLOAD_LABEL} limit.`,
       };
-      errors.push(`${file.name}: File exceeds the 500MB limit.`);
+      errors.push(`${file.name}: File exceeds the ${MAX_UPLOAD_LABEL} limit.`);
       onProgress?.([...progress]);
       continue;
     }
@@ -96,13 +123,14 @@ export async function uploadMediaFiles({
       });
 
     if (uploadError) {
+      const message = formatStorageUploadError(uploadError.message, file.size);
       progress[index] = {
         filename: file.name,
         progress: 100,
         status: "error",
-        error: uploadError.message,
+        error: message,
       };
-      errors.push(`${file.name}: ${uploadError.message}`);
+      errors.push(`${file.name}: ${message}`);
       onProgress?.([...progress]);
       continue;
     }

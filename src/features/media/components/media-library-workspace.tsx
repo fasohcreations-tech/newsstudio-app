@@ -177,6 +177,20 @@ export function MediaLibraryWorkspace({
           <h1 className="text-sm font-semibold tracking-tight">Media Library</h1>
           <p className="text-xs text-muted-foreground">{organizationName}</p>
         </div>
+        <div className="flex shrink-0 gap-2">
+          <a
+            href="/media-library/clips"
+            className="inline-flex h-8 items-center justify-center rounded-lg border border-border bg-background px-2.5 text-[0.8rem] font-medium hover:bg-muted"
+          >
+            Asset Clips
+          </a>
+          <a
+            href="/media-library/clip-editor"
+            className="inline-flex h-8 items-center justify-center rounded-lg bg-primary px-2.5 text-[0.8rem] font-medium text-primary-foreground hover:bg-primary/80"
+          >
+            Clip Editor
+          </a>
+        </div>
       </div>
 
       <MediaToolbar

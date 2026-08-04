@@ -7,6 +7,7 @@ import type { SupabaseClient } from "@supabase/supabase-js";
 import { motionSceneDb } from "@/features/motion-scene-engine/lib/motion-scene-db";
 import type { MotionScene } from "@/features/motion-scene-engine/types/motion-scene.types";
 import { isLockedMasterTemplate } from "@/features/story-scene-builder/lib/master-template-guard";
+import { extendSceneDocumentDuration } from "@/features/story-scene-builder/lib/extend-scene-duration";
 import type { StoryDataRecord } from "@/features/story-production/types/story-data.types";
 
 export type InstantiateFromMasterInput = {
@@ -40,6 +41,10 @@ export async function instantiateSceneFromMaster(
   });
 
   const db = motionSceneDb(client);
+  const sceneDocument = extendSceneDocumentDuration(
+    master.scene_document,
+    input.durationMs,
+  );
   const { data, error } = await db
     .from("creative_studio_motion_scenes")
     .insert({
@@ -67,7 +72,7 @@ export async function instantiateSceneFromMaster(
       },
       transitions: master.transitions,
       preview: master.preview,
-      scene_document: master.scene_document,
+      scene_document: sceneDocument,
       // Do not inherit master's resolved text — only panel bindings.
       resolved_bindings: {
         ...input.resolvedBindings,
