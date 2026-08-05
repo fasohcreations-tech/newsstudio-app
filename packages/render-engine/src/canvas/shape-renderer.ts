@@ -150,6 +150,8 @@ export function drawShapeLayer(
 ): boolean {
   const shape = layer.shape;
   if (!shape?.enabled) return false;
+  // Reveal cover has fully exited — nothing to draw for this shape.
+  if (shape.shapeVisible === false) return false;
 
   const { x, y, width, height } = layer.transform;
   const b = shape.behaviour;

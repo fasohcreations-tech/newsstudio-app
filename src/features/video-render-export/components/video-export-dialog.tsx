@@ -175,20 +175,19 @@ export function VideoExportDialog({
             <label className="flex items-center gap-2">
               <input
                 type="checkbox"
-                checked={settings.previewScope === "shortest"}
+                checked={settings.previewScope === "scene-1"}
                 onChange={(e) =>
                   setSettings((s) => ({
                     ...s,
-                    previewScope: e.target.checked ? "shortest" : "full",
+                    previewScope: e.target.checked ? "scene-1" : "full",
                   }))
                 }
               />
-              Test render — shortest scene only
+              Test render — Scene 1 only
             </label>
             <p className="mt-1 text-xs text-muted-foreground">
-              Captures one scene at full frame rate to check motion fidelity in
-              minutes. A full timeline render takes roughly a minute of
-              rasterizing per second of output.
+              Captures the first enabled Timeline scene at the selected frame
+              rate, rebased to start at 0.
             </p>
           </div>
         </div>

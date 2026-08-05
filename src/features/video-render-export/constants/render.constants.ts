@@ -51,7 +51,8 @@ export const DEFAULT_EXPORT_SETTINGS = {
   bitrateKbps: 4000,
   includeVoice: true,
   includeMusic: true,
-  previewScope: "full" as "full" | "shortest",
+  // Keep validation renders focused on Scene 1 until Canvas V2 reaches parity.
+  previewScope: "scene-1" as "full" | "scene-1" | "shortest",
 };
 
 export const RENDER_STORAGE_BUCKET = "organizations";

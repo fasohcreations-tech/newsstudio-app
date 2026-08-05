@@ -87,18 +87,23 @@ export function buildRenderPlan(input: {
     };
   });
 
-  // Scoped test render: keep the shortest clip and rebase it to the timeline
-  // origin so the capture, the FFmpeg duration and the voice offset all agree.
-  const shortest =
-    input.settings.previewScope === "shortest" && planClips.length > 0
-      ? planClips.reduce((min, c) => (c.durationMs < min.durationMs ? c : min))
-      : null;
-  const effectiveClips = shortest
-    ? [{ ...shortest, startMs: 0, endMs: shortest.durationMs }]
+  // Scoped test render: Scene 1 is the first enabled Timeline clip. Rebase it
+  // to zero so capture and FFmpeg use the scene's duration consistently.
+  // Keep the old shortest scope readable for already-created jobs.
+  const testClip =
+    input.settings.previewScope === "scene-1"
+      ? (planClips[0] ?? null)
+      : input.settings.previewScope === "shortest" && planClips.length > 0
+        ? planClips.reduce((min, c) =>
+            c.durationMs < min.durationMs ? c : min,
+          )
+        : null;
+  const effectiveClips = testClip
+    ? [{ ...testClip, startMs: 0, endMs: testClip.durationMs }]
     : planClips;
 
-  const durationMs = shortest
-    ? shortest.durationMs
+  const durationMs = testClip
+    ? testClip.durationMs
     : Math.max(
         input.bundle.timeline.duration_ms,
         effectiveClips.reduce((max, c) => Math.max(max, c.endMs), 0),

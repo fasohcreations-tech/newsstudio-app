@@ -7,8 +7,9 @@
 
 import { applyLayerTransform } from "./geometry";
 import { drawEffectLayer } from "./effects-renderer";
-import { drawImageLayer } from "./image-renderer";
+import { drawImageLayer, drawMediaPlaceholder } from "./image-renderer";
 import { drawShapeLayer } from "./shape-renderer";
+import { drawLayerSweeps } from "./sweep-renderer";
 import { drawTextLayer } from "./text-renderer";
 import { drawVideoLayer } from "./video-renderer";
 import type { FrameState, RawFramePacket } from "../types";
@@ -77,6 +78,11 @@ export class CanvasRenderer {
       list.push(layer);
       byKind.set(layer.kind, list);
     }
+    // Within a bucket, honour the document's stacking order so chrome (e.g. the
+    // lower-third bar) cannot paint over accent shapes authored above it.
+    for (const list of byKind.values()) {
+      list.sort((a, b) => a.sortOrder - b.sortOrder);
+    }
 
     for (const kind of order) {
       const layers = byKind.get(kind) ?? [];
@@ -92,7 +98,11 @@ export class CanvasRenderer {
         );
 
         let drawn = false;
-        if (kind === "video" || layer.regionKey === "main_video_container") {
+        const isMainVideo =
+          kind === "video" ||
+          layer.regionKey === "main-video" ||
+          layer.regionKey === "main_video_container";
+        if (isMainVideo) {
           drawn = await drawVideoLayer(
             ctx,
             layer,
@@ -101,37 +111,67 @@ export class CanvasRenderer {
             clip?.videoUrl ?? null,
           );
           if (!drawn && clip?.imageUrl) {
-            drawn = drawImageLayer(ctx, layer, this.runtime, clip.imageUrl);
+            drawn = drawImageLayer(
+              ctx,
+              layer,
+              this.runtime,
+              clip.imageUrl,
+              state.scenePlayheadMs,
+            );
           }
         } else if (kind === "image" || kind === "logo" || kind === "advertisement") {
+          // Never fall back generic image slots to the story main image —
+          // that painted the flood photo into the logo / optional-info holes.
           const fallback =
             kind === "logo"
               ? clip?.logoUrl
               : kind === "advertisement"
                 ? clip?.advertisementUrl
-                : clip?.imageUrl;
-          drawn = drawImageLayer(ctx, layer, this.runtime, fallback);
+                : null;
+          drawn = drawImageLayer(
+            ctx,
+            layer,
+            this.runtime,
+            fallback,
+            state.scenePlayheadMs,
+          );
+          // Keep unresolved media regions visible instead of silently blank.
+          if (!drawn && layer.shape?.enabled) {
+            drawn = drawShapeLayer(ctx, layer);
+          }
+          if (!drawn) drawn = drawMediaPlaceholder(ctx, layer);
         } else if (kind === "shape") {
-          drawn = drawShapeLayer(ctx, layer);
+          // A shape slot can still carry assigned media (skeleton panels).
+          if (layer.mediaUrl || layer.mediaPlaylist?.length) {
+            drawn = drawImageLayer(
+              ctx,
+              layer,
+              this.runtime,
+              null,
+              state.scenePlayheadMs,
+            );
+          }
+          drawn = drawShapeLayer(ctx, layer) || drawn;
         } else if (
           kind === "text" ||
           kind === "lower_third" ||
           kind === "ticker"
         ) {
           const override =
-            layer.regionKey === "headline" || kind === "lower_third"
+            layer.regionKey === "headline"
               ? clip?.headline
               : layer.regionKey === "subheadline"
                 ? clip?.subheadline
                 : layer.regionKey === "ticker" || kind === "ticker"
                   ? clip?.tickerText
-                  : null;
-          drawn = drawTextLayer(ctx, layer, override);
-          // Shape chrome behind text bars
+                  : kind === "lower_third"
+                    ? clip?.headline
+                    : null;
+          // Chrome (bar/panel) first, then text on top.
           if (layer.shape?.enabled) {
-            drawShapeLayer(ctx, layer);
-            drawn = drawTextLayer(ctx, layer, override) || drawn;
+            drawn = drawShapeLayer(ctx, layer);
           }
+          drawn = drawTextLayer(ctx, layer, override) || drawn;
         } else if (kind === "effect") {
           drawn = drawEffectLayer(ctx, layer);
         } else if (kind === "background") {
@@ -166,6 +206,9 @@ export class CanvasRenderer {
           }
         }
 
+        // Sweeps ride above the layer's own content (rim / highlight passes).
+        drawLayerSweeps(ctx, layer);
+
         layer.drawn = drawn;
         ctx.restore();
       }
@@ -174,9 +217,20 @@ export class CanvasRenderer {
     // Always paint plan main media into the video hole if no layer drew it.
     if (clip?.videoUrl || clip?.imageUrl) {
       const hole =
-        state.layers.find((l) => l.regionKey === "main_video_container") ??
-        state.layers.find((l) => l.kind === "video");
-      if (hole && !hole.drawn) {
+        state.layers.find(
+          (l) =>
+            l.regionKey === "main-video" ||
+            l.regionKey === "main_video_container" ||
+            l.kind === "video",
+        ) ?? null;
+      const anyMainDrawn = state.layers.some(
+        (l) =>
+          l.drawn &&
+          (l.kind === "video" ||
+            l.regionKey === "main-video" ||
+            l.regionKey === "main_video_container"),
+      );
+      if (hole && !anyMainDrawn) {
         ctx.save();
         applyLayerTransform(
           ctx,
@@ -200,6 +254,7 @@ export class CanvasRenderer {
             { ...hole, mediaUrl: clip.imageUrl, mediaKind: "image" },
             this.runtime,
             clip.imageUrl,
+            state.scenePlayheadMs,
           );
         }
         ctx.restore();

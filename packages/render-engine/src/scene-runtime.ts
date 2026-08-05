@@ -14,6 +14,7 @@ import type {
   RuntimeScene,
   SampledMotion,
   ShapeSampler,
+  SweepSampler,
 } from "./types";
 
 const IDENTITY_MOTION: SampledMotion = {
@@ -53,6 +54,7 @@ export type SceneRuntimeOptions = {
   plan: RuntimePlan;
   motionSampler?: MotionSampler;
   shapeSampler?: ShapeSampler;
+  sweepSampler?: SweepSampler;
   onLog?: RenderEngineLog;
 };
 
@@ -64,6 +66,7 @@ export class SceneRuntime {
   readonly plan: RuntimePlan;
   private motionSampler: MotionSampler;
   private shapeSampler: ShapeSampler | null;
+  private sweepSampler: SweepSampler | null;
   private onLog?: RenderEngineLog;
   private ready = false;
   private media = new Map<string, HTMLImageElement | HTMLVideoElement>();
@@ -72,6 +75,7 @@ export class SceneRuntime {
     this.plan = opts.plan;
     this.motionSampler = opts.motionSampler ?? defaultMotionSampler;
     this.shapeSampler = opts.shapeSampler ?? null;
+    this.sweepSampler = opts.sweepSampler ?? null;
     this.onLog = opts.onLog;
   }
 
@@ -130,9 +134,14 @@ export class SceneRuntime {
         );
         if (!motion.visible) continue;
 
+        const sweeps = this.sweepSampler
+          ? this.sweepSampler(layer, scenePlayheadMs)
+          : (layer.sweeps ?? null);
+
         layers.push({
           ...layer,
           shape,
+          sweeps,
           motion,
           drawn: false,
         });

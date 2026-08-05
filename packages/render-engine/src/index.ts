@@ -12,6 +12,7 @@ export * from "./canvas/geometry";
 export * from "./canvas/video-renderer";
 export * from "./canvas/image-renderer";
 export * from "./canvas/shape-renderer";
+export * from "./canvas/sweep-renderer";
 export * from "./canvas/text-renderer";
 export * from "./canvas/effects-renderer";
 export * from "./encoder/ffmpeg-encoder-interface";

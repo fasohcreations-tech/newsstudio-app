@@ -69,6 +69,8 @@ export type RuntimeShape = {
   shadow?: { color: string; blur: number; offsetX: number; offsetY: number } | null;
   glow?: { color: string; blur: number; strength: number } | null;
   revealProgress?: number;
+  /** False once the reveal cover has exited — shape must not paint. */
+  shapeVisible?: boolean;
   behaviour?: {
     opacity?: number;
     translateX?: number;
@@ -78,6 +80,47 @@ export type RuntimeShape = {
     lightSweepProgress?: number | null;
     edgeSweepProgress?: number | null;
   } | null;
+};
+
+/**
+ * Sweeps are NOT Shape Composer behaviours — Light Sweep comes from the
+ * broadcast effect stack and Edge Sweep from the per-object edge_sweep
+ * behaviour. Both are sampled from playheadMs and drawn as overlays.
+ */
+/** CSS mix-blend-mode names carried from the effect config. */
+export type SweepBlendMode = string;
+
+export type RuntimeLightSweep = {
+  /** 0–1 across the box, or null while paused between loops. */
+  progress: number | null;
+  angle: number;
+  width: number;
+  opacity: number;
+  softness: number;
+  color: string;
+  blendMode: SweepBlendMode;
+  /** Optional box the sweep covers instead of the layer box (headline → panel). */
+  coverage?: { left: number; top: number; width: number; height: number } | null;
+};
+
+export type RuntimeEdgeSweep = {
+  /** 0–1 around the perimeter. */
+  progress: number;
+  color: string;
+  width: number;
+  /** Arc length as a fraction of the perimeter. */
+  length: number;
+  opacity: number;
+  brightness: number;
+  glowIntensity: number;
+  cornerRadius: number;
+  trailLength: number;
+  blendMode: SweepBlendMode;
+};
+
+export type RuntimeSweeps = {
+  light: RuntimeLightSweep | null;
+  edge: RuntimeEdgeSweep | null;
 };
 
 export type RuntimeLayerKind =
@@ -108,10 +151,23 @@ export type RuntimeLayer = {
   fontWeight?: string | number | null;
   color?: string | null;
   textAlign?: CanvasTextAlign;
+  /** Vertical alignment inside the layer box. */
+  verticalAlign?: "top" | "middle" | "bottom";
+  lineHeight?: number;
+  letterSpacing?: number;
+  /** Solid fill painted behind the layer (lower-third panel, ticker bar). */
+  backgroundFill?: string | null;
+  /** When true text is a single non-wrapping line (ticker). */
+  singleLine?: boolean;
   mediaUrl?: string | null;
   mediaKind?: "video" | "image" | null;
+  /** Optional-info regions cycle a playlist on the Timeline clock. */
+  mediaPlaylist?: string[] | null;
+  slideIntervalMs?: number | null;
   objectFit?: "cover" | "contain" | "fill";
   shape?: RuntimeShape | null;
+  /** Light / edge sweep overlays sampled from the Timeline playhead. */
+  sweeps?: RuntimeSweeps | null;
   /** Region key used by broadcast templates (main_video_container, headline, …). */
   regionKey?: string | null;
   metadata?: Record<string, unknown>;
@@ -192,3 +248,8 @@ export type ShapeSampler = (
   layer: RuntimeLayer,
   playheadMs: number,
 ) => RuntimeShape | null;
+
+export type SweepSampler = (
+  layer: RuntimeLayer,
+  playheadMs: number,
+) => RuntimeSweeps | null;

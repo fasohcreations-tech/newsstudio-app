@@ -65,11 +65,10 @@ export type VideoExportSettings = {
   includeVoice: boolean;
   includeMusic: boolean;
   /**
-   * `"shortest"` renders only the shortest scene clip, rebased to start at 0,
-   * so motion fidelity can be validated in minutes instead of committing to a
-   * full-timeline capture.
+   * `"scene-1"` renders only the first Timeline scene, rebased to start at 0.
+   * `"shortest"` remains accepted for compatibility with existing jobs.
    */
-  previewScope?: "full" | "shortest";
+  previewScope?: "full" | "scene-1" | "shortest";
 };
 
 /** Snapshot of what to render — copied at job create time (source of truth for the job). */

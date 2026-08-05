@@ -4,6 +4,13 @@
  */
 
 import { getComposerSceneAction } from "@/features/scene-composer/actions/scene-composer.actions";
+import {
+  findLowerInfoPanelObject,
+  getObjectEffectStack,
+  resolveHeadlineLightSweepCoverage,
+  sampleBroadcastEffects,
+} from "@/features/scene-composer/lib/broadcast-effects";
+import { getEdgeSweepConfig } from "@/features/scene-composer/lib/edge-sweep";
 import { sampleLayerMotion } from "@/features/scene-composer/lib/motion-animation";
 import {
   getShapeConfig,
@@ -11,8 +18,13 @@ import {
   sampleShapeReveal,
 } from "@/features/scene-composer/lib/shape-composer";
 import type { ComposerScene } from "@/features/scene-composer/types/scene-composer.types";
+import { resolveStoryBindingRefs } from "@/features/story-production/lib/resolve-story-binding-refs";
 import { extendComposerSceneForDuration } from "@/features/story-scene-builder/lib/extend-scene-duration";
-import { buildRuntimePlan } from "@/features/video-render-export/lib/scene-to-runtime";
+import {
+  bindingsForClip,
+  buildRuntimePlan,
+  patchComposerSceneForPreview,
+} from "@/features/video-render-export/lib/scene-to-runtime";
 import type { CaptureFrameReport } from "@/features/video-render-export/services/browser-render-worker";
 import type {
   RenderPlan,
@@ -24,6 +36,7 @@ import {
   ensureFontsLoaded,
   type RuntimeLayer,
   type RuntimeShape,
+  type RuntimeSweeps,
   type SampledMotion,
 } from "@mediaos/render-engine";
 
@@ -39,10 +52,57 @@ function clipAt(plan: RenderPlan, timeMs: number): RenderPlanClip | null {
   );
 }
 
+/**
+ * Same-origin assets (e.g. /demo/gnn/logo.svg) must bypass the media proxy —
+ * it only accepts absolute http(s) URLs and 400s on relative paths, which is
+ * why the logo never bound. Same-origin loads don't taint the canvas anyway.
+ */
+function isSameOriginAsset(url: string): boolean {
+  if (!/^https?:\/\//i.test(url)) return true;
+  try {
+    return new URL(url).origin === window.location.origin;
+  } catch {
+    return false;
+  }
+}
+
 async function loadMediaElement(
   url: string,
   kind: "video" | "image",
 ): Promise<HTMLImageElement | HTMLVideoElement | null> {
+  if (isSameOriginAsset(url)) {
+    try {
+      if (kind === "image") {
+        const img = new Image();
+        await new Promise<void>((resolve, reject) => {
+          img.onload = () => resolve();
+          img.onerror = () => reject(new Error("image load failed"));
+          img.src = url;
+        });
+        // SVGs without intrinsic size still decode fine for drawImage.
+        await img.decode?.().catch(() => undefined);
+        return img;
+      }
+      const video = document.createElement("video");
+      video.muted = true;
+      video.playsInline = true;
+      video.preload = "auto";
+      video.src = url;
+      await new Promise<void>((resolve) => {
+        const done = () => {
+          video.removeEventListener("loadeddata", done);
+          resolve();
+        };
+        video.addEventListener("loadeddata", done);
+        window.setTimeout(done, 8000);
+        video.load();
+      });
+      return video;
+    } catch {
+      return null;
+    }
+  }
+
   const proxy = `/api/render-media-proxy?url=${encodeURIComponent(url)}`;
   try {
     const res = await fetch(proxy);
@@ -161,6 +221,7 @@ function createMediaOsSamplers(scenes: Record<string, ComposerScene>) {
     return {
       ...base,
       revealProgress: reveal.phaseProgress,
+      shapeVisible: reveal.shapeVisible,
       behaviour: {
         opacity: behaviour.opacity * reveal.shapeOpacity,
         translateX: behaviour.translateX + reveal.shapeTranslateX,
@@ -177,7 +238,95 @@ function createMediaOsSamplers(scenes: Record<string, ComposerScene>) {
     };
   };
 
-  return { sampleMotion, sampleShape };
+  const sampleSweeps = (
+    layer: RuntimeLayer,
+    playheadMs: number,
+  ): RuntimeSweeps | null => {
+    const obj = findObject(layer);
+    if (!obj) return null;
+
+    let light: RuntimeSweeps["light"] = null;
+    const overlays = sampleBroadcastEffects(getObjectEffectStack(obj)).overlays;
+    const lightOverlay = overlays.find((o) => o.kind === "light_sweep");
+    if (lightOverlay && lightOverlay.kind === "light_sweep") {
+      const p = lightOverlay.params;
+      // Same phase math as BroadcastEffectOverlays.lightSweepProgress so the
+      // render and the preview agree frame for frame.
+      const cycleMs = Math.max(400, 1000 / Math.max(0.05, p.speed));
+      const total = cycleMs + Math.max(0, p.repeatDelayMs);
+      const local = p.loop
+        ? playheadMs % total
+        : Math.min(playheadMs % total, cycleMs);
+      const inCycle = local <= cycleMs;
+      const raw = inCycle ? local / cycleMs : 1;
+      // null progress = paused between loops (overlay opacity 0).
+      const progress = !inCycle
+        ? null
+        : p.direction === "reverse"
+          ? 1 - raw
+          : raw;
+
+      // Headline light sweep covers the whole lower-info panel, same as Preview.
+      const sceneId = objectByLayerId.get(layer.id)?.sceneId;
+      const sceneObjects =
+        (sceneId ? scenes[sceneId]?.composer_document?.objects : null) ?? [];
+      const lowerPanel = findLowerInfoPanelObject(sceneObjects) ?? null;
+      const cov = resolveHeadlineLightSweepCoverage(obj, lowerPanel);
+
+      light = {
+        progress,
+        angle: p.angle,
+        width: p.width,
+        opacity: p.opacity,
+        softness: p.softness,
+        color: p.color,
+        blendMode: p.blendMode ?? "screen",
+        coverage: cov
+          ? {
+              left: cov.left,
+              top: cov.top,
+              width: cov.width,
+              height: cov.height,
+            }
+          : null,
+      };
+    }
+
+    let edge: RuntimeSweeps["edge"] = null;
+    const cfg = getEdgeSweepConfig(obj);
+    // `on_hover` never triggers in a headless render — no pointer.
+    if (cfg.enabled && cfg.loop !== "on_hover") {
+      const periodMs = Math.max(120, 1000 / Math.max(0.01, cfg.speed));
+      const once = cfg.loop === "once" || cfg.loop === "on_scene_start";
+      const t = once
+        ? Math.min(playheadMs, periodMs)
+        : playheadMs % periodMs;
+      const raw = t / periodMs;
+      const done = once && playheadMs > periodMs;
+      if (!done) {
+        edge = {
+          progress: cfg.direction === "counterclockwise" ? 1 - raw : raw,
+          color: cfg.color,
+          width: cfg.width,
+          length: Math.max(0.01, cfg.length),
+          opacity: cfg.opacity,
+          brightness: cfg.brightness,
+          glowIntensity: cfg.glowIntensity,
+          cornerRadius:
+            cfg.cornerStyle === "sharp"
+              ? 0
+              : (cfg.cornerRadius ?? Number(obj.style?.corner_radius ?? 0) ?? 0),
+          trailLength: Math.max(0, cfg.trailLength),
+          blendMode: cfg.blendMode ?? "normal",
+        };
+      }
+    }
+
+    if (!light && !edge) return null;
+    return { light, edge };
+  };
+
+  return { sampleMotion, sampleShape, sampleSweeps };
 }
 
 export type CanvasCaptureSessionApi = {
@@ -224,10 +373,13 @@ export function createCanvasCaptureSession(
         const result = await getComposerSceneAction(id);
         if (result.success && result.data) {
           const clip = next.clips.find((c) => c.motionSceneId === id);
-          sceneCache[id] = extendComposerSceneForDuration(
+          const extended = extendComposerSceneForDuration(
             result.data,
             clip?.durationMs ?? result.data.duration_ms ?? 10_000,
           );
+          // Apply the same GNN patches Story Preview uses so left-rail logo /
+          // info-2 layout and Edge/Light Sweep demos are present for sampling.
+          sceneCache[id] = patchComposerSceneForPreview(extended);
           log(
             `Scene Initialized ${id.slice(0, 8)} (${result.data.name ?? "untitled"})`,
           );
@@ -238,12 +390,40 @@ export function createCanvasCaptureSession(
         }
       }
 
-      const runtimePlan = buildRuntimePlan(next, sceneCache);
+      // Story bindings store assigned assets as `library://` / `clip://` refs.
+      // Resolve them to real URLs exactly like the DOM host's
+      // useResolvedStoryBindings — otherwise the logo falls back to the demo
+      // mark and the optional-info panels render empty.
+      const resolvedBindingsBySceneId: Record<
+        string,
+        Record<string, string>
+      > = {};
+      for (const clip of next.clips) {
+        const id = clip.motionSceneId;
+        if (!id || resolvedBindingsBySceneId[id]) continue;
+        const scene = sceneCache[id];
+        if (!scene) continue;
+        const raw = bindingsForClip(scene, clip);
+        try {
+          resolvedBindingsBySceneId[id] = await resolveStoryBindingRefs(raw);
+        } catch (err) {
+          const detail = err instanceof Error ? err.message : String(err);
+          log(`Binding ref resolve failed (${detail}) — using raw bindings`);
+          resolvedBindingsBySceneId[id] = raw;
+        }
+      }
+
+      const runtimePlan = buildRuntimePlan(
+        next,
+        sceneCache,
+        resolvedBindingsBySceneId,
+      );
       const samplers = createMediaOsSamplers(sceneCache);
       runtime = new SceneRuntime({
         plan: runtimePlan,
         motionSampler: samplers.sampleMotion,
         shapeSampler: samplers.sampleShape,
+        sweepSampler: samplers.sampleSweeps,
         onLog: log,
       });
 
@@ -277,17 +457,82 @@ export function createCanvasCaptureSession(
         }
       }
 
-      // Bind layer media URLs
+      // Bind layer media URLs (including every optional-info playlist slide).
+      let bound = 0;
+      let failed = 0;
       for (const scene of Object.values(runtimePlan.scenes)) {
         for (const layer of scene.layers) {
-          if (!layer.mediaUrl || runtime.getMedia(layer.mediaUrl)) continue;
-          const el = await loadMediaElement(
-            layer.mediaUrl,
-            layer.mediaKind === "video" ? "video" : "image",
-          );
-          if (el) runtime.setMedia(layer.mediaUrl, el);
+          const urls = [
+            ...(layer.mediaPlaylist ?? []),
+            ...(layer.mediaUrl ? [layer.mediaUrl] : []),
+          ];
+          for (const url of urls) {
+            if (!url || runtime.getMedia(url)) continue;
+            const el = await loadMediaElement(
+              url,
+              layer.mediaKind === "video" ? "video" : "image",
+            );
+            if (el) {
+              runtime.setMedia(url, el);
+              bound += 1;
+            } else {
+              failed += 1;
+              log(`Media bind failed (${layer.regionKey ?? layer.name}): ${url.slice(0, 80)}`);
+            }
+          }
         }
       }
+      log(`✓ Layer media bound — ${bound} asset(s)${failed ? `, ${failed} failed` : ""}`);
+
+      // Explicit logo / optional-info diagnostics — these were the silent misses.
+      let logos = 0;
+      let optionalPanels = 0;
+      for (const scene of Object.values(runtimePlan.scenes)) {
+        for (const layer of scene.layers) {
+          if (layer.kind === "logo" || layer.regionKey === "reporter-logo") {
+            logos += 1;
+            const url = layer.mediaUrl;
+            log(
+              url
+                ? `✓ Logo layer — ${layer.name} · ${url.slice(0, 64)}`
+                : `✗ Logo layer — ${layer.name} · no media bound`,
+            );
+          }
+          if (
+            layer.regionKey === "optional-info" ||
+            layer.regionKey === "optional-info-1" ||
+            layer.regionKey === "optional-info-2"
+          ) {
+            optionalPanels += 1;
+            const n = layer.mediaPlaylist?.length ?? (layer.mediaUrl ? 1 : 0);
+            log(
+              n > 0
+                ? `✓ Optional-info — ${layer.name} · ${n} slide(s)`
+                : `✗ Optional-info — ${layer.name} · empty (no assigned asset)`,
+            );
+          }
+        }
+      }
+      if (logos === 0) log("✗ Logo — no reporter-logo / logo layer in scene");
+      if (optionalPanels === 0) log("✗ Optional-info — no left-rail panel in scene");
+
+      // Report what the sweep/playlist samplers actually found, so a missing
+      // effect is visible in the log instead of silently absent.
+      let lightSweeps = 0;
+      let edgeSweeps = 0;
+      let playlists = 0;
+      for (const scene of Object.values(runtimePlan.scenes)) {
+        for (const layer of scene.layers) {
+          if ((layer.mediaPlaylist?.length ?? 0) > 0) playlists += 1;
+          const s = samplers.sampleSweeps(layer, 0);
+          if (s?.light) lightSweeps += 1;
+          if (s?.edge) edgeSweeps += 1;
+        }
+      }
+      log(
+        `✓ Light Sweep — ${lightSweeps} layer(s) · Edge Sweep — ${edgeSweeps} layer(s)`,
+      );
+      log(`✓ Optional-info playlists — ${playlists} panel(s)`);
 
       await ensureFontsLoaded([
         "Segoe UI",

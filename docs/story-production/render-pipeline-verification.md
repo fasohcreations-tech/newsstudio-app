@@ -379,6 +379,14 @@ Clear queue: **hard delete** jobs (except active), not soft-delete.
 | `Media rematerialize failed: Failed to fetch` repeating every frame | Unreachable asset was retried per frame; now capped at 3 attempts then skipped for the render | `mediaFetchFailures` / `isMediaDead` in the capture host |
 | Proxy fetch fails on large videos | Streamed upstream body dropping mid-flight reads as an opaque `Failed to fetch`; the route now buffers | `src/app/api/render-media-proxy/route.ts` |
 | Storage Open fails, Local works | Free-tier size limit; by design | `Cloud upload skipped` |
+| Canvas V2: Optional Information Area empty | Panels are authored as skeleton/shape objects; the adapter classified them as `shape`, so their assigned media was never drawn | `kindOf` → `isOptionalInfoRegion` in `scene-to-runtime.ts` |
+| Canvas V2: assigned asset ignored (logo / panels) | Per-object media lives in `object.bindings.src` (token or URL); only the story-binding path was read | `mediaUrlOf` in `scene-to-runtime.ts` |
+| Canvas V2: Edge Sweep invisible on the white lower panel | Sweeps were composited with `lighter`; the demo presets use `blendMode: "normal"`, and additive blue on white is a no-op | `blendToComposite` in `sweep-renderer.ts` |
+| Canvas V2: Light Sweep direction / speed differs from preview | CSS angles are clockwise from “to top”; the band is projected onto that axis and swept edge to edge | `drawLightSweep` in `sweep-renderer.ts` |
+| Canvas V2: logo shows the demo mark, optional-info empty | Story bindings store assigned assets as `library://` / `clip://` refs; the DOM host resolves them via `useResolvedStoryBindings`, Canvas did not | `resolveStoryBindingRefs` called in the Canvas warm-up |
+| Canvas V2: assigned logo replaced by `/demo/gnn/logo.svg` | The render plan's demo `logoUrl` overrode the scene's real `resolved_bindings.logo` | `bindingsForClip` only applies the plan logo when the scene has none |
+| Canvas V2: white lower third covers the headline | Frame chrome landed in the `unknown` bucket, which paints last | `kindOf` routes frames with a solid fill into the `shape` bucket |
+| Canvas V2: chrome paints over accent shapes | Bucket members drew in scene-array order, ignoring `sort_order` | Buckets are sorted by `sortOrder` in `canvas-renderer.ts` |
 
 **Observed bad output** (`render-cc9e7b75.mp4`): correct container (1280×720@24), GNN chrome/logos present, **Main Video black**, lower panel/ticker empty — capture paint incomplete before finalize.
 
