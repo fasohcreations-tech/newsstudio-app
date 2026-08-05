@@ -78,8 +78,12 @@ export type RenderPlanClip = {
   trimInMs: number;
   headline: string;
   subheadline: string;
+  /** Optional ticker / lower-third crawl text when known at plan time. */
+  tickerText: string;
   videoUrl: string | null;
   imageUrl: string | null;
+  logoUrl: string | null;
+  advertisementUrl: string | null;
   transitionToNext: string;
   transitionDurationMs: number;
 };
@@ -110,7 +114,7 @@ export type VideoRenderProgressPatch = {
   status?: VideoRenderStatus;
   progress?: number;
   elapsedMs?: number;
-  etaMs?: number;
+  etaMs?: number | null;
   error?: string | null;
   outputBucket?: string;
   outputPath?: string;

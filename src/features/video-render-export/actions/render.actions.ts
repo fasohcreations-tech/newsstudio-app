@@ -13,11 +13,25 @@ import {
 import {
   buildRenderStoragePath,
   cancelVideoRender,
+  clearVideoRenders,
   createVideoRenderJob,
   getVideoRender,
   listVideoRenders,
   updateVideoRenderProgress,
 } from "@/features/video-render-export/services/render-job.service";
+import {
+  getActiveRenderProviderInfo,
+  resolveProviderInfo,
+} from "@/features/video-render-export/services/render-manager";
+import {
+  runManagedRenderJob,
+  type ManagedRenderLocalFile,
+} from "@/features/video-render-export/services/run-managed-render";
+import { clearCachedRenderOutputs } from "@/features/video-render-export/lib/local-render-cache";
+import type {
+  RenderProviderId,
+  RenderProviderInfo,
+} from "@/features/video-render-export/types/render-provider.types";
 import type { VideoRenderRow } from "@/features/video-render-export/types/render.types";
 import { getStoryVoiceSignedUrlAction } from "@/features/story-voice/actions/voice.actions";
 import { createClient } from "@/shared/lib/supabase/server";
@@ -111,6 +125,108 @@ export async function createVideoRenderAction(
 
   revalidatePath(`/newsroom/stories/${parsed.data.storyId}`);
   return { success: true, data: result.data };
+}
+
+export async function getActiveRenderProviderAction(): Promise<
+  RenderActionResult<RenderProviderInfo>
+> {
+  return { success: true, data: getActiveRenderProviderInfo() };
+}
+
+export type ExecuteProviderRenderResult = {
+  job: VideoRenderRow;
+  localFile: ManagedRenderLocalFile | null;
+  provider: RenderProviderInfo;
+};
+
+/**
+ * Execute a queued render via RenderManager (local FFmpeg or RenderOS).
+ * Optional `provider` overrides RENDER_PROVIDER for this job only.
+ */
+export async function executeProviderRenderAction(input: {
+  renderId: string;
+  storyId: string;
+  provider?: RenderProviderId;
+}): Promise<RenderActionResult<ExecuteProviderRenderResult>> {
+  const parsed = renderIdSchema.safeParse({ renderId: input.renderId });
+  if (!parsed.success) {
+    return { success: false, error: "Invalid render id" };
+  }
+
+  const ctx = await requireStoryContext(input.storyId);
+  if (!ctx.membership) return { success: false, error: ctx.error ?? "Unauthorized" };
+
+  const providerOverride =
+    input.provider === "local" || input.provider === "cloud"
+      ? input.provider
+      : null;
+
+  const result = await runManagedRenderJob(ctx.supabase, {
+    organizationId: ctx.membership.organization.id,
+    userId: ctx.user.id,
+    renderId: parsed.data.renderId,
+    provider: providerOverride,
+  });
+
+  if (result.error && !result.data) {
+    return { success: false, error: result.error };
+  }
+  if (result.data?.status === "failed") {
+    return {
+      success: false,
+      error: result.error ?? result.data.error ?? "Render failed",
+    };
+  }
+  if (!result.data) {
+    return { success: false, error: result.error ?? "Render failed" };
+  }
+
+  revalidatePath(`/newsroom/stories/${input.storyId}`);
+  return {
+    success: true,
+    data: {
+      job: result.data,
+      localFile: result.localFile,
+      provider: resolveProviderInfo(result.providerId),
+    },
+  };
+}
+
+export async function clearVideoRendersAction(input: {
+  storyId: string;
+  finishedOnly?: boolean;
+  excludeIds?: string[];
+}): Promise<RenderActionResult<{ cleared: number }>> {
+  const storyId = zStoryId(input.storyId);
+  if (!storyId) return { success: false, error: "Invalid story id" };
+
+  const ctx = await requireStoryContext(storyId);
+  if (!ctx.membership) return { success: false, error: ctx.error ?? "Unauthorized" };
+
+  const result = await clearVideoRenders(
+    ctx.supabase,
+    ctx.membership.organization.id,
+    storyId,
+    {
+      finishedOnly: input.finishedOnly ?? false,
+      excludeIds: input.excludeIds,
+    },
+  );
+  if (result.error || !result.data) {
+    return { success: false, error: result.error ?? "Failed to clear queue" };
+  }
+
+  await clearCachedRenderOutputs(result.data.renderIds);
+  revalidatePath(`/newsroom/stories/${storyId}`);
+  return { success: true, data: { cleared: result.data.cleared } };
+}
+
+function zStoryId(value: string): string | null {
+  return /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(
+    value,
+  )
+    ? value
+    : null;
 }
 
 export async function updateVideoRenderProgressAction(

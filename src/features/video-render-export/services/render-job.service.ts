@@ -201,17 +201,26 @@ export async function createVideoRenderJob(
 
   const resolvedMedia: Record<
     string,
-    { videoUrl: string | null; imageUrl: string | null }
+    {
+      videoUrl: string | null;
+      imageUrl: string | null;
+      logoUrl: string | null;
+      advertisementUrl: string | null;
+    }
   > = {};
 
   for (const scene of pkg.data.scenes) {
     const bindings: Record<string, string> = {};
     if (scene.video_asset_ref) bindings.main_video = scene.video_asset_ref;
     if (scene.image_asset_ref) bindings.main_image = scene.image_asset_ref;
+    if (scene.logo_ref) bindings.logo = scene.logo_ref;
+    if (scene.advertisement_ref) bindings.advertisement = scene.advertisement_ref;
     const urls = await resolveMediaUrls(client, bindings);
     resolvedMedia[scene.id] = {
       videoUrl: urls.main_video?.trim() || null,
       imageUrl: urls.main_image?.trim() || null,
+      logoUrl: urls.logo?.trim() || null,
+      advertisementUrl: urls.advertisement?.trim() || null,
     };
   }
 
@@ -329,6 +338,55 @@ export async function cancelVideoRender(
     error: "Cancelled by user",
     finished: true,
   });
+}
+
+/**
+ * Remove render jobs for a story from the queue.
+ * Uses hard delete — soft-delete UPDATE fails under RLS when setting deleted_at
+ * (WITH CHECK inherited `deleted_at is null`).
+ */
+export async function clearVideoRenders(
+  client: Client,
+  organizationId: string,
+  storyId: string,
+  options?: {
+    finishedOnly?: boolean;
+    /** Keep these jobs (e.g. the one currently encoding). */
+    excludeIds?: string[];
+  },
+): Promise<Result<{ cleared: number; renderIds: string[] }>> {
+  const db = videoRenderDb(client);
+  const { data, error } = await db
+    .from("story_video_renders")
+    .select("id, status")
+    .eq("organization_id", organizationId)
+    .eq("story_id", storyId)
+    .is("deleted_at", null);
+
+  if (error) return fail(error.message);
+
+  const rows = (data ?? []) as Array<{ id: string; status: string }>;
+  const finished = new Set(["succeeded", "failed", "cancelled"]);
+  const exclude = new Set(options?.excludeIds ?? []);
+  const targets = rows.filter((r) => {
+    if (exclude.has(r.id)) return false;
+    if (options?.finishedOnly) return finished.has(r.status);
+    return true;
+  });
+  const renderIds = targets.map((r) => r.id);
+  if (renderIds.length === 0) {
+    return ok({ cleared: 0, renderIds: [] });
+  }
+
+  const { error: deleteError } = await db
+    .from("story_video_renders")
+    .delete()
+    .eq("organization_id", organizationId)
+    .eq("story_id", storyId)
+    .in("id", renderIds);
+
+  if (deleteError) return fail(deleteError.message);
+  return ok({ cleared: renderIds.length, renderIds });
 }
 
 export function buildRenderStoragePath(input: {

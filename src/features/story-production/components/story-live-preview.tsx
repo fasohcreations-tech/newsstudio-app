@@ -587,6 +587,11 @@ function SelectableShell({
     <div
       className={className}
       data-object-id={object.id}
+      data-region-key={
+        typeof object.metadata?.region_key === "string"
+          ? object.metadata.region_key
+          : undefined
+      }
       data-selected={selected ? "true" : "false"}
       data-edge-sweep={edgeEnabled ? "true" : "false"}
       data-shape-reveal={revealSample?.phase}

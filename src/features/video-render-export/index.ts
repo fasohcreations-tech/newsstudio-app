@@ -9,6 +9,11 @@ export type {
   VideoRenderStatus,
 } from "@/features/video-render-export/types/render.types";
 
+export type {
+  RenderProviderId,
+  RenderProviderInfo,
+} from "@/features/video-render-export/types/render-provider.types";
+
 export {
   DEFAULT_EXPORT_SETTINGS,
   FUTURE_EXPORT_CODECS,
@@ -20,7 +25,10 @@ export {
 
 export {
   cancelVideoRenderAction,
+  clearVideoRendersAction,
   createVideoRenderAction,
+  executeProviderRenderAction,
+  getActiveRenderProviderAction,
   getVideoRenderAction,
   listVideoRendersAction,
   updateVideoRenderProgressAction,

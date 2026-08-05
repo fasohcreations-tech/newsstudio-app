@@ -27,7 +27,12 @@ export function buildRenderPlan(input: {
   settings: VideoExportSettings;
   resolvedMedia: Record<
     string,
-    { videoUrl: string | null; imageUrl: string | null }
+    {
+      videoUrl: string | null;
+      imageUrl: string | null;
+      logoUrl: string | null;
+      advertisementUrl: string | null;
+    }
   >;
   voiceUrl: string | null;
   musicUrl: string | null;
@@ -53,6 +58,13 @@ export function buildRenderPlan(input: {
       ? input.resolvedMedia[instance.id]
       : undefined;
     const transition = transitionsByFrom.get(clip.id);
+    const meta = (instance?.metadata ?? {}) as Record<string, unknown>;
+    const tickerFromMeta =
+      typeof meta.ticker === "string"
+        ? meta.ticker
+        : typeof meta.ticker_text === "string"
+          ? meta.ticker_text
+          : "";
 
     return {
       clipId: clip.id,
@@ -65,8 +77,11 @@ export function buildRenderPlan(input: {
       trimInMs: clip.trim_in_ms ?? 0,
       headline: instance?.headline?.trim() || instance?.name || clip.name,
       subheadline: instance?.subheadline?.trim() || "",
+      tickerText: tickerFromMeta.trim() || instance?.body_text?.trim() || "",
       videoUrl: media?.videoUrl ?? null,
       imageUrl: media?.imageUrl ?? null,
+      logoUrl: media?.logoUrl ?? null,
+      advertisementUrl: media?.advertisementUrl ?? null,
       transitionToNext: transition?.transition_type ?? "cut",
       transitionDurationMs: transition?.duration_ms ?? 0,
     };

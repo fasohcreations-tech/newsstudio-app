@@ -7,6 +7,7 @@ import {
   RefreshCw,
   RotateCcw,
   Square,
+  Trash2,
 } from "lucide-react";
 
 import { Badge } from "@/components/ui/badge";
@@ -36,34 +37,59 @@ type VideoRenderQueueProps = {
   renders: VideoRenderRow[];
   activeRenderId: string | null;
   pending: boolean;
+  /** Render IDs that still have a local download ready */
+  localReadyIds?: string[];
   onRefresh: () => void;
+  onClearQueue?: () => void;
   onCancel: (renderId: string) => void;
   onRetry: (render: VideoRenderRow) => void;
+  onDownloadLocal?: (renderId: string) => void;
 };
 
 export function VideoRenderQueue({
   renders,
   activeRenderId,
   pending,
+  localReadyIds = [],
   onRefresh,
+  onClearQueue,
   onCancel,
   onRetry,
+  onDownloadLocal,
 }: VideoRenderQueueProps) {
+  // Allow clearing finished + stuck jobs; keep the in-flight job if any.
+  const clearable = renders.some((r) => r.id !== activeRenderId);
+
   return (
     <div className="space-y-3">
       <div className="flex items-center justify-between gap-2">
         <h3 className="text-sm font-semibold">Render Queue</h3>
-        <Button
-          type="button"
-          size="sm"
-          variant="outline"
-          className="h-7"
-          disabled={pending}
-          onClick={onRefresh}
-        >
-          <RefreshCw className={cn("size-3.5", pending && "animate-spin")} />
-          Refresh
-        </Button>
+        <div className="flex flex-wrap gap-1">
+          {onClearQueue ? (
+            <Button
+              type="button"
+              size="sm"
+              variant="outline"
+              className="h-7"
+              disabled={pending || !clearable}
+              onClick={onClearQueue}
+            >
+              <Trash2 className="size-3.5" />
+              Clear queue
+            </Button>
+          ) : null}
+          <Button
+            type="button"
+            size="sm"
+            variant="outline"
+            className="h-7"
+            disabled={pending}
+            onClick={onRefresh}
+          >
+            <RefreshCw className={cn("size-3.5", pending && "animate-spin")} />
+            Refresh
+          </Button>
+        </div>
       </div>
 
       {renders.length === 0 ? (
@@ -81,6 +107,11 @@ export function VideoRenderQueue({
               "encoding",
               "uploading",
             ].includes(job.status);
+            const localReady =
+              localReadyIds.includes(job.id) ||
+              (job.status === "succeeded" &&
+                (!job.output_url ||
+                  Boolean(job.error?.includes("Cloud upload skipped"))));
             return (
               <li
                 key={job.id}
@@ -165,6 +196,18 @@ export function VideoRenderQueue({
                           Download
                         </a>
                       </>
+                    ) : null}
+                    {localReady && onDownloadLocal ? (
+                      <Button
+                        type="button"
+                        size="sm"
+                        variant="default"
+                        className="h-7 text-xs"
+                        onClick={() => onDownloadLocal(job.id)}
+                      >
+                        <Download className="size-3.5" />
+                        Local file
+                      </Button>
                     ) : null}
                   </div>
                 </div>

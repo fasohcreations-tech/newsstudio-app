@@ -89,6 +89,9 @@ create policy "story_video_renders_update_member"
   using (
     deleted_at is null
     and public.is_org_member(organization_id)
+  )
+  with check (
+    public.is_org_member(organization_id)
   );
 
 create policy "story_video_renders_delete_member"

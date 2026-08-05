@@ -46,14 +46,14 @@ export const VIDEO_EXPORT_FRAME_RATES = [24, 25, 30, 50, 60] as const;
 
 export const DEFAULT_EXPORT_SETTINGS = {
   format: "mp4" as VideoExportFormat,
-  resolution: "1920x1080" as VideoExportResolutionId,
-  frameRate: 30,
-  bitrateKbps: 8000,
+  resolution: "1280x720" as VideoExportResolutionId,
+  frameRate: 24,
+  bitrateKbps: 4000,
   includeVoice: true,
   includeMusic: true,
 };
 
-export const RENDER_STORAGE_BUCKET = "stories";
+export const RENDER_STORAGE_BUCKET = "organizations";
 
 export const RENDER_AUDIO = {
   codec: "aac",
