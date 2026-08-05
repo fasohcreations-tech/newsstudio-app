@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 
 import {
   getEdgeSweepConfig,
@@ -137,36 +137,66 @@ export function EdgeSweepOverlay({
     }
   })();
 
-  useEffect(() => {
-    if (!shouldAnimate) return;
-    const path = pathRef.current;
-    const trail = trailRef.current;
-    if (!path) return;
+  const sweepDurationMs = Math.max(400, 1000 / Math.max(0.05, config.speed));
 
-    let raf = 0;
-    const start = performance.now();
-    const durationMs = Math.max(400, 1000 / Math.max(0.05, config.speed));
-
-    const tick = (now: number) => {
-      const elapsed = now - start;
-      let progress = (elapsed / durationMs) % 1;
-      if (config.loop === "once" && elapsed >= durationMs) {
-        progress = 1;
-        setOnceDone(true);
-      }
-      if (config.direction === "counterclockwise") {
-        progress = 1 - progress;
-      }
-      const offset = perimeter * progress;
+  const applyProgress = useCallback(
+    (progress: number) => {
+      const path = pathRef.current;
+      if (!path) return;
+      const p =
+        config.direction === "counterclockwise" ? 1 - progress : progress;
       const dir = config.direction === "clockwise" ? -1 : 1;
+      const offset = perimeter * p;
       path.setAttribute("stroke-dashoffset", String(dir * offset));
+      const trail = trailRef.current;
       if (trail) {
         trail.setAttribute(
           "stroke-dashoffset",
           String(dir * offset + perimeter * 0.03),
         );
       }
-      if (!(config.loop === "once" && elapsed >= durationMs)) {
+    },
+    [config.direction, perimeter],
+  );
+
+  // Playback / render: sample the shared timeline clock. A wall-clock RAF would
+  // run at capture pacing rather than timeline pacing, which made the sweep
+  // speed in exported video unrelated to the speed in the editor.
+  useEffect(() => {
+    if (!isPlaying || !shouldAnimate) return;
+    const localMs = Math.max(0, playheadMs - (object.start_ms ?? 0));
+    const progress =
+      config.loop === "once"
+        ? Math.min(1, localMs / sweepDurationMs)
+        : (localMs / sweepDurationMs) % 1;
+    applyProgress(progress);
+  }, [
+    isPlaying,
+    shouldAnimate,
+    playheadMs,
+    object.start_ms,
+    config.loop,
+    sweepDurationMs,
+    applyProgress,
+  ]);
+
+  // Editor idle / hover preview keeps its own clock — there is no timeline yet.
+  useEffect(() => {
+    if (isPlaying || !shouldAnimate) return;
+    if (!pathRef.current) return;
+
+    let raf = 0;
+    const start = performance.now();
+
+    const tick = (now: number) => {
+      const elapsed = now - start;
+      let progress = (elapsed / sweepDurationMs) % 1;
+      if (config.loop === "once" && elapsed >= sweepDurationMs) {
+        progress = 1;
+        setOnceDone(true);
+      }
+      applyProgress(progress);
+      if (!(config.loop === "once" && elapsed >= sweepDurationMs)) {
         raf = requestAnimationFrame(tick);
       }
     };
@@ -174,11 +204,11 @@ export function EdgeSweepOverlay({
     raf = requestAnimationFrame(tick);
     return () => cancelAnimationFrame(raf);
   }, [
+    isPlaying,
     shouldAnimate,
-    config.speed,
-    config.direction,
+    sweepDurationMs,
     config.loop,
-    perimeter,
+    applyProgress,
     activePreviewNonce,
   ]);
 

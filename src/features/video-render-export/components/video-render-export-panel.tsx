@@ -66,6 +66,7 @@ type EncodeLogLine = {
 };
 
 const PROVIDER_STORAGE_KEY = "mediaos.renderProvider";
+const FRAME_DEBUG_STORAGE_KEY = "mediaos.renderFrameDebug";
 const MAX_LOG_LINES = 400;
 
 /**
@@ -85,6 +86,9 @@ export function VideoRenderExportPanel({
   const [localReadyIds, setLocalReadyIds] = useState<string[]>([]);
   const [provider, setProvider] = useState<RenderProviderId>("local");
   const [envDefault, setEnvDefault] = useState<RenderProviderId | null>(null);
+  const [frameDebug, setFrameDebug] = useState(false);
+  const frameDebugRef = useRef(false);
+  frameDebugRef.current = frameDebug;
   const [panelTab, setPanelTab] = useState<"queue" | "log">("queue");
   const [encodeLogs, setEncodeLogs] = useState<EncodeLogLine[]>([]);
   const localFilesRef = useRef<Record<string, LocalFileEntry>>({});
@@ -127,6 +131,16 @@ export function VideoRenderExportPanel({
   }, [refresh]);
 
   useEffect(() => {
+    try {
+      setFrameDebug(
+        window.localStorage.getItem(FRAME_DEBUG_STORAGE_KEY) === "1",
+      );
+    } catch {
+      /* ignore */
+    }
+  }, []);
+
+  useEffect(() => {
     void getActiveRenderProviderAction().then((result) => {
       if (!result.success) return;
       setEnvDefault(result.data.id);
@@ -148,6 +162,16 @@ export function VideoRenderExportPanel({
     appendLog(`Render engine set to ${next}`);
     try {
       window.localStorage.setItem(PROVIDER_STORAGE_KEY, next);
+    } catch {
+      /* ignore */
+    }
+  }
+
+  function chooseFrameDebug(next: boolean) {
+    setFrameDebug(next);
+    appendLog(`Frame Debug mode ${next ? "enabled" : "disabled"}`);
+    try {
+      window.localStorage.setItem(FRAME_DEBUG_STORAGE_KEY, next ? "1" : "0");
     } catch {
       /* ignore */
     }
@@ -195,6 +219,11 @@ export function VideoRenderExportPanel({
     appendLog(`Capture engine: ${COMPOSED_CAPTURE_ENGINE}`);
     appendLog("── Stage 1: Timeline → clips");
     const plan = job.render_plan;
+    if (plan.clips.length === 1) {
+      appendLog(
+        `Scope: single scene "${plan.clips[0]!.name}" (${(plan.durationMs / 1000).toFixed(1)}s) — test render`,
+      );
+    }
     logVerify(
       appendLog,
       plan.clips.length > 0,
@@ -269,7 +298,11 @@ export function VideoRenderExportPanel({
     const captured = await runBrowserTimelineRender(job.render_plan, {
       videoOnly: true,
       shouldCancel: () => cancelRef.current,
-      verification: { renderId: job.id, enabled: true },
+      verification: {
+        renderId: job.id,
+        enabled: true,
+        allFrames: frameDebugRef.current,
+      },
       capture: {
         warmUp: (p) => {
           const api = captureRef.current;
@@ -607,6 +640,24 @@ export function VideoRenderExportPanel({
               </span>
             </button>
           </div>
+
+          <label className="flex items-start gap-2 rounded-md border border-border/60 px-3 py-2 text-xs">
+            <input
+              type="checkbox"
+              className="mt-0.5 size-3.5 shrink-0"
+              checked={frameDebug}
+              disabled={Boolean(activeRenderId)}
+              onChange={(e) => chooseFrameDebug(e.target.checked)}
+            />
+            <span>
+              <span className="block font-medium">Frame Debug mode</span>
+              <span className="text-muted-foreground">
+                Writes every Timeline frame as PNG to{" "}
+                <code>debug/render/&lt;jobId&gt;/frames/</code> and logs
+                per-frame runtime state. Slow and disk-heavy — QA only.
+              </span>
+            </span>
+          </label>
         </div>
 
         <Alert>

@@ -29,6 +29,8 @@ export async function GET(request: Request) {
       headers: {
         Accept: "*/*",
       },
+      // Fail fast instead of leaving the capture loop hanging on a dead upstream.
+      signal: AbortSignal.timeout(60_000),
     });
     if (!upstream.ok || !upstream.body) {
       return NextResponse.json(
@@ -39,15 +41,21 @@ export async function GET(request: Request) {
 
     const contentType =
       upstream.headers.get("content-type") || "application/octet-stream";
-    return new NextResponse(upstream.body, {
+    // Buffer rather than pipe the upstream stream through: a streamed response
+    // that drops mid-flight surfaces to the browser as an opaque
+    // "Failed to fetch", which is exactly what stalled the render capture.
+    const buffer = Buffer.from(await upstream.arrayBuffer());
+    return new NextResponse(buffer, {
       status: 200,
       headers: {
         "Content-Type": contentType,
-        "Cache-Control": "private, max-age=120",
+        "Content-Length": String(buffer.byteLength),
+        "Cache-Control": "private, max-age=600",
       },
     });
   } catch (err) {
     const message = err instanceof Error ? err.message : "Proxy failed";
+    console.error("[render-media-proxy]", target.toString().slice(0, 120), message);
     return NextResponse.json({ error: message }, { status: 502 });
   }
 }

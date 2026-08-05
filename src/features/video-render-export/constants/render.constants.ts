@@ -51,6 +51,7 @@ export const DEFAULT_EXPORT_SETTINGS = {
   bitrateKbps: 4000,
   includeVoice: true,
   includeMusic: true,
+  previewScope: "full" as "full" | "shortest",
 };
 
 export const RENDER_STORAGE_BUCKET = "organizations";

@@ -57,21 +57,31 @@ export async function POST(request: Request, context: RouteContext) {
       /[^a-zA-Z0-9_\-]/g,
       "",
     );
+    const extension =
+      String(form.get("extension") || "jpg").replace(/[^a-z0-9]/gi, "") === "png"
+        ? "png"
+        : "jpg";
+    const subdir = String(form.get("subdir") || "").replace(
+      /[^a-zA-Z0-9_\-]/g,
+      "",
+    );
     const file = form.get("file");
     if (!(file instanceof Blob) || file.size < 32) {
       return NextResponse.json({ error: "Frame file missing" }, { status: 400 });
     }
 
-    const dir = path.join(process.cwd(), "debug", "render", renderId);
+    const segments = ["debug", "render", renderId];
+    if (subdir) segments.push(subdir);
+    const dir = path.join(process.cwd(), ...segments);
     await mkdir(dir, { recursive: true });
-    const filename = `${label}.jpg`;
+    const filename = `${label}.${extension}`;
     const absolutePath = path.join(dir, filename);
     const buffer = Buffer.from(await file.arrayBuffer());
     await writeFile(absolutePath, buffer);
 
     return NextResponse.json({
       ok: true,
-      path: `debug/render/${renderId}/${filename}`,
+      path: `${segments.join("/")}/${filename}`,
       byteLength: buffer.byteLength,
     });
   } catch (err) {

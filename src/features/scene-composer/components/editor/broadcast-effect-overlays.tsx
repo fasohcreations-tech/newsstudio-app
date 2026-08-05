@@ -129,6 +129,7 @@ export function BroadcastEffectOverlays({
                 density={overlay.density}
                 speed={overlay.speed}
                 color={overlay.color}
+                clockMs={clockMs}
                 isPlaying={isPlaying}
               />
             );
@@ -258,12 +259,14 @@ function ParticleDustOverlay({
   density,
   speed,
   color,
+  clockMs,
   isPlaying,
 }: {
   opacity: number;
   density: number;
   speed: number;
   color: string;
+  clockMs: number;
   isPlaying: boolean;
 }) {
   const ref = useRef<HTMLDivElement>(null);
@@ -271,16 +274,24 @@ function ParticleDustOverlay({
   useEffect(() => {
     const el = ref.current;
     if (!el) return;
+
+    // Playback / render samples the timeline clock, matching the light sweep.
+    if (isPlaying) {
+      const t = (clockMs / 1000) * speed;
+      el.style.transform = `translate3d(0, ${Math.sin(t) * 6}px, 0)`;
+      return;
+    }
+
     let raf = 0;
     const start = performance.now();
     const tick = (now: number) => {
-      const t = ((now - start) / 1000) * speed * (isPlaying ? 1 : 0.6);
+      const t = ((now - start) / 1000) * speed * 0.6;
       el.style.transform = `translate3d(0, ${Math.sin(t) * 6}px, 0)`;
       raf = requestAnimationFrame(tick);
     };
     raf = requestAnimationFrame(tick);
     return () => cancelAnimationFrame(raf);
-  }, [isPlaying, speed]);
+  }, [isPlaying, speed, clockMs]);
 
   const dots = Math.max(4, Math.round(density * 16));
 

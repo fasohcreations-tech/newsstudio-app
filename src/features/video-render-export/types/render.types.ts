@@ -64,6 +64,12 @@ export type VideoExportSettings = {
   bitrateKbps: number;
   includeVoice: boolean;
   includeMusic: boolean;
+  /**
+   * `"shortest"` renders only the shortest scene clip, rebased to start at 0,
+   * so motion fidelity can be validated in minutes instead of committing to a
+   * full-timeline capture.
+   */
+  previewScope?: "full" | "shortest";
 };
 
 /** Snapshot of what to render — copied at job create time (source of truth for the job). */

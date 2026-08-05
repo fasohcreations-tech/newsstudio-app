@@ -3,7 +3,7 @@
 **Audience:** Head developer verification  
 **Date:** 2026-08-05  
 **Feature root:** `src/features/video-render-export/`  
-**Status:** Hybrid Local path is the production path. Capture engine **`dom-raster-v11-playback`** + **Render Verification Mode**. Frames are rasterized from the live `StoryLivePreview` DOM (full CSS fidelity), and capture is **frame-accurate** (`requestFrame` + FFmpeg re-time) so paint speed cannot truncate the timeline.
+**Status:** Hybrid Local path is the production path. Capture engine **`dom-raster-v11-playback`** + **Render Verification Mode** + **Frame Debug mode**. Frames are rasterized from the live `StoryLivePreview` DOM (full CSS fidelity), capture is **frame-accurate** (`requestFrame` + FFmpeg re-time) so paint speed cannot truncate the timeline, and rendering is **deterministic**: one painted frame per Timeline frame at the export frame rate, with every subsystem driven from `playheadMs` alone (Module 3.1.2).
 
 ---
 
@@ -88,7 +88,7 @@ Render the **assembled Timeline** (Motion Scenes + scene-instance media + voice)
 
 | File | Role |
 |------|------|
-| `services/browser-render-worker.ts` | Frame loop, `captureStream(0)` + `requestFrame`, MediaRecorder, FPS cap 6 |
+| `services/browser-render-worker.ts` | Frame loop at Timeline fps, `captureStream(0)` + `requestFrame`, MediaRecorder, Frame Debug mode |
 | `lib/ensure-scrubbable-blob.ts` | WebM duration patch for scrubbing |
 | `app/api/render-media-proxy/route.ts` | Same-origin proxy (CORS-safe canvas) |
 | `app/api/video-renders/[id]/stage-composed/route.ts` | Cache browser WebM for FFmpeg |
@@ -187,7 +187,10 @@ Panel (only when `provider === "local"`):
 
 Worker:
 
-- Caps capture to **6 fps** (`BROWSER_CAPTURE_FPS_CAP`) regardless of export 24 fps.
+- Renders **one painted frame per Timeline frame at the export frame rate**
+  (24/30/60). `BROWSER_CAPTURE_FPS_CEILING` is only a sanity bound. Sub-sampling
+  and interpolating is not acceptable — entrance/exit and behaviour curves
+  collapse at 6 fps.
 - `videoOnly: true` → no browser VO mix; FFmpeg muxes voice later.
 - Uses `canvas.captureStream(0)` + `track.requestFrame()` → exactly one recorded
   frame per painted frame, then `MediaRecorder` → WebM.
@@ -217,8 +220,48 @@ disable the rasterizer for the rest of the job and log why.
 Log lines: `Capture engine: dom-raster-v11-playback (DOM rasterizer + StoryLivePreview clocks)`
 and `Frame paint: DOM rasterizer active (full CSS fidelity).`
 
-Capture FPS capped at **6**. Because output timing is frame-indexed, a slow
-rasterize makes the render take longer but never changes the result.
+Capture runs at the Timeline frame rate. Because output timing is frame-indexed,
+a slow rasterize makes the render take longer but never changes the result.
+
+### 4.4 Timeline is the only clock (Module 3.1.2)
+
+Every subsystem derives its state from `playheadMs`. Nothing in the render path
+may read `Date.now()`, `performance.now()`, `setInterval` or browser playback
+speed, because capture wall-time runs far slower than Timeline time — anything
+on browser time renders at the wrong speed.
+
+Verified timeline-driven:
+
+| Subsystem | Where | How |
+|------|------|------|
+| Layer motion (entrance/idle/exit) | `sampleLayerMotion` | pure function of `playheadMs` |
+| Shape Composer reveal + behaviours | `ShapeRenderer` | `timeMs = useExternalClock \|\| isPlaying ? clockMs : restMs`; local RAF disabled while playing |
+| Shape preview clock | `useShapePreviewClock` | returns `playheadMs` when `isPlaying` |
+| Light sweep | `LightSweepOverlay` | `isPlaying ? clockMs : performance.now()` |
+| Edge sweep | `EdgeSweepOverlay` | samples `playheadMs - object.start_ms`; own clock only for editor idle/hover |
+| Particle dust | `ParticleDustOverlay` | bob derived from `clockMs` when playing |
+| Main video slideshow | `Gnn001MainVideoContainer` | `floor(clockMs / 4000) % galleryLength` |
+| Optional-info + sub-headline slides | `story-live-preview` | `floor(playheadMs / intervalMs) % slides` |
+| Slide transition | `story-live-preview` | same WAAPI keyframes, `pause()` + `currentTime` seek |
+| Video playback | `seekPlanVideo` / `syncVideosToPlayhead` | seek + `seeked` + `requestVideoFrameCallback`, `SEEK_EPSILON_SEC` below one frame |
+
+Scene cuts remount `StoryLivePreview` via `key={previewComposer.id}` (same as
+`StoryTimelinePreview`) so per-layer animation state does not leak across scenes.
+
+### 4.5 Frame Debug mode
+
+Toggle in the export panel (persisted in `localStorage`). Writes **every** frame
+as PNG to `debug/render/<jobId>/frames/frameNNNN.png` and logs full per-frame
+telemetry. Slow and disk-heavy — QA only. When off, telemetry is logged once per
+Timeline second and on every scene cut, and only spread sample frames are dumped
+(`frame-001`, `frame-010pct` … `frame-090pct`, `frame-last`).
+
+Per-frame log line:
+
+```
+Frame 412/2259 · playhead 17125ms · scene Scene 02 @ 2125ms ·
+layers 14 (shape 6, behaviour 9, motion 11) · video 2.13s · raster dom-raster 486ms
+```
 
 ---
 
@@ -330,7 +373,11 @@ Clear queue: **hard delete** jobs (except active), not soft-delete.
 | Output = assets+VO only, no package chrome | Stage missing → FFmpeg **asset concat fallback** | Log: `No composed capture staged` |
 | Ticker shows literal “Ticker” | Binding unresolved; overlay uses `bindings.ticker` | Plan + composer `resolved_bindings` |
 | Music missing | `musicUrl` always null at create today | `render-job.service` create call |
-| Capture slow | 6 fps DOM blit + seek per frame | `browser-render-worker` FPS cap |
+| Capture slow | Expected — one DOM rasterize + video seek per Timeline frame (24fps ≈ 2.3k frames for 94s) | `raster …ms` in the per-frame log |
+| Animation runs at wrong speed | A subsystem is on browser time, not `playheadMs` | §4.4 table |
+| Animation frozen after first scene cut | Per-layer state leaked across scenes | `key={previewComposer.id}` on `StoryLivePreview` |
+| `Media rematerialize failed: Failed to fetch` repeating every frame | Unreachable asset was retried per frame; now capped at 3 attempts then skipped for the render | `mediaFetchFailures` / `isMediaDead` in the capture host |
+| Proxy fetch fails on large videos | Streamed upstream body dropping mid-flight reads as an opaque `Failed to fetch`; the route now buffers | `src/app/api/render-media-proxy/route.ts` |
 | Storage Open fails, Local works | Free-tier size limit; by design | `Cloud upload skipped` |
 
 **Observed bad output** (`render-cc9e7b75.mp4`): correct container (1280×720@24), GNN chrome/logos present, **Main Video black**, lower panel/ticker empty — capture paint incomplete before finalize.

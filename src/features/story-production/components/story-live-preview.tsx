@@ -885,46 +885,69 @@ function PreviewObject({
   );
   const [optionalSlideIndex, setOptionalSlideIndex] = useState(manualSlideIndex);
   const optionalMediaRef = useRef<HTMLElement | null>(null);
+  /** Playback / render: every subsystem derives state from playheadMs only. */
+  const timelineDriven = motionMode === "playback";
 
   useEffect(() => {
+    if (timelineDriven) return;
     if (optionalSlides.length <= 1) return;
     const timer = window.setInterval(() => {
       setOptionalSlideIndex((index) => (index + 1) % optionalSlides.length);
     }, intervalMs);
     return () => window.clearInterval(timer);
-  }, [intervalMs, optionalSlides.length]);
+  }, [intervalMs, optionalSlides.length, timelineDriven]);
 
   useEffect(() => {
     setOptionalSlideIndex(manualSlideIndex);
   }, [manualSlideIndex, bindings.optional_info_image, object.id]);
 
+  const activeOptionalSlideIndex =
+    timelineDriven && optionalSlides.length > 1
+      ? Math.floor(Math.max(0, playheadMs) / intervalMs) % optionalSlides.length
+      : optionalSlideIndex;
+
   useEffect(() => {
     if (!isOptionalInfoRegion || transitionMs <= 0) return;
     const el = optionalMediaRef.current;
     if (!el) return;
-    if (transitionStyle === "fade") {
-      el.animate(
-        [
-          { opacity: 0.15 },
-          { opacity: 1 },
-        ],
-        { duration: transitionMs, easing: "ease-out" },
-      );
-    } else if (transitionStyle === "slide") {
-      el.animate(
-        [
-          { opacity: 0.2, transform: "translateX(16px) scale(1.01)" },
-          { opacity: 1, transform: "translateX(0) scale(1)" },
-        ],
-        { duration: transitionMs, easing: "ease-out" },
+
+    const keyframes: Keyframe[] | null =
+      transitionStyle === "fade"
+        ? [{ opacity: 0.15 }, { opacity: 1 }]
+        : transitionStyle === "slide"
+          ? [
+              { opacity: 0.2, transform: "translateX(16px) scale(1.01)" },
+              { opacity: 1, transform: "translateX(0) scale(1)" },
+            ]
+          : null;
+    if (!keyframes) return;
+
+    const animation = el.animate(keyframes, {
+      duration: transitionMs,
+      easing: "ease-out",
+      fill: "both",
+    });
+
+    // Same keyframes either way — playback just seeks them from the timeline
+    // instead of letting the browser run them on wall clock.
+    if (timelineDriven) {
+      animation.pause();
+      animation.currentTime = Math.min(
+        transitionMs,
+        Math.max(0, playheadMs) % intervalMs,
       );
     }
+
+    return () => animation.cancel();
   }, [
     isOptionalInfoRegion,
-    optionalSlideIndex,
+    activeOptionalSlideIndex,
     optionalSlides.length,
     transitionMs,
     transitionStyle,
+    timelineDriven,
+    playheadMs,
+    intervalMs,
   ]);
 
   const subHeadlineSlides = useMemo(() => {
@@ -952,12 +975,18 @@ function PreviewObject({
   ]);
   const [subHeadlineIndex, setSubHeadlineIndex] = useState(0);
   useEffect(() => {
+    if (timelineDriven) return;
     if (subHeadlineSlides.length <= 1) return;
     const timer = window.setInterval(() => {
       setSubHeadlineIndex((index) => (index + 1) % subHeadlineSlides.length);
     }, intervalMs);
     return () => window.clearInterval(timer);
-  }, [intervalMs, subHeadlineSlides.length]);
+  }, [intervalMs, subHeadlineSlides.length, timelineDriven]);
+  const activeSubHeadlineIndex =
+    timelineDriven && subHeadlineSlides.length > 1
+      ? Math.floor(Math.max(0, playheadMs) / intervalMs) %
+        subHeadlineSlides.length
+      : subHeadlineIndex;
   useEffect(() => {
     setSubHeadlineIndex(0);
   }, [
@@ -1142,6 +1171,8 @@ function PreviewObject({
             onBrowseMedia ? () => onBrowseMedia(object) : undefined
           }
           suppressFrameChrome={shapeActive}
+          clockMs={playheadMs}
+          isPlaying={motionMode === "playback"}
         />
       </SelectableShell>
     );
@@ -1189,7 +1220,7 @@ function PreviewObject({
     const rotatingSubHeadline =
       isSubheadlineRegion && subHeadlineSlides.length > 0
         ? subHeadlineSlides[
-            Math.max(0, subHeadlineIndex) % subHeadlineSlides.length
+            Math.max(0, activeSubHeadlineIndex) % subHeadlineSlides.length
           ] ?? null
         : null;
     const displayLabel = rotatingSubHeadline || label;
@@ -1216,7 +1247,7 @@ function PreviewObject({
       const slideMediaUrl =
         isOptionalInfoRegion && optionalSlides.length > 0
           ? optionalSlides[
-              Math.max(0, optionalSlideIndex) % optionalSlides.length
+              Math.max(0, activeOptionalSlideIndex) % optionalSlides.length
             ] ?? null
           : null;
       const displayMediaUrl = slideMediaUrl || mediaUrl;
@@ -1474,7 +1505,7 @@ function PreviewObject({
   const rotatingSubHeadline =
     isSubheadlineRegion && subHeadlineSlides.length > 0
       ? subHeadlineSlides[
-          Math.max(0, subHeadlineIndex) % subHeadlineSlides.length
+          Math.max(0, activeSubHeadlineIndex) % subHeadlineSlides.length
         ] ?? null
       : null;
   const displayLabel = rotatingSubHeadline || label;
@@ -1935,6 +1966,8 @@ export function StoryLivePreview({
                 ? () => onBrowseMedia(mainVideoFallback)
                 : undefined
             }
+            clockMs={playheadMs}
+            isPlaying={motionMode === "playback"}
           />
         </div>
       ) : null}

@@ -170,6 +170,27 @@ export function VideoExportDialog({
               Include background music (when present on Timeline)
             </label>
           </div>
+
+          <div className="rounded-md border border-border/60 p-3 text-sm">
+            <label className="flex items-center gap-2">
+              <input
+                type="checkbox"
+                checked={settings.previewScope === "shortest"}
+                onChange={(e) =>
+                  setSettings((s) => ({
+                    ...s,
+                    previewScope: e.target.checked ? "shortest" : "full",
+                  }))
+                }
+              />
+              Test render — shortest scene only
+            </label>
+            <p className="mt-1 text-xs text-muted-foreground">
+              Captures one scene at full frame rate to check motion fidelity in
+              minutes. A full timeline render takes roughly a minute of
+              rasterizing per second of output.
+            </p>
+          </div>
         </div>
 
         <DialogFooter>

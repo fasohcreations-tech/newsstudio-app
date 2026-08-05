@@ -8,6 +8,7 @@
 import { ensureScrubbableVideoBlob } from "@/features/video-render-export/lib/ensure-scrubbable-blob";
 import {
   debugFrameLabels,
+  frameDebugLabel,
   logVerify,
   saveRenderDebugFrame,
 } from "@/features/video-render-export/lib/render-verification";
@@ -16,9 +17,26 @@ import type {
   VideoRenderStatus,
 } from "@/features/video-render-export/types/render.types";
 
+/** What the capture host resolved for one Timeline frame. */
+export type CaptureFrameReport = {
+  sceneName: string | null;
+  motionSceneId: string | null;
+  scenePlayheadMs: number;
+  layers: number;
+  shapeLayers: number;
+  behaviourLayers: number;
+  motionLayers: number;
+  videoTimeMs: number | null;
+  rasterMode: "dom-raster" | "layer-blit";
+  rasterMs: number;
+};
+
 export type RenderCaptureBridge = {
   warmUp: (plan: RenderPlan) => Promise<void>;
-  paintFrame: (timeMs: number, dest: HTMLCanvasElement) => Promise<void>;
+  paintFrame: (
+    timeMs: number,
+    dest: HTMLCanvasElement,
+  ) => Promise<CaptureFrameReport | void>;
   /** Optional Stage-5 readiness gate (fonts, media, plan video). */
   verifyReadiness?: (plan: RenderPlan) => Promise<void>;
 };
@@ -37,6 +55,11 @@ export type RenderWorkerCallbacks = {
   verification?: {
     renderId: string;
     enabled?: boolean;
+    /**
+     * Frame Debug mode — write every Timeline frame as PNG to
+     * debug/render/{id}/frames/. Slow and disk-heavy; QA only.
+     */
+    allFrames?: boolean;
   };
 };
 
@@ -54,8 +77,13 @@ export type RenderWorkerResult = {
   frameCount: number;
 };
 
-/** Lean capture rate so progress keeps moving on heavy Motion Scenes. */
-const BROWSER_CAPTURE_FPS_CAP = 6;
+/**
+ * Deterministic rendering: one painted frame per Timeline frame at the export
+ * frame rate. Sub-sampling and interpolating is not acceptable for broadcast —
+ * entrance/exit and behaviour curves collapse. The ceiling only guards against
+ * a nonsense plan value.
+ */
+const BROWSER_CAPTURE_FPS_CEILING = 120;
 
 function pickRecorderMime(format: RenderPlan["format"]): {
   mimeType: string;
@@ -228,16 +256,11 @@ export async function runBrowserTimelineRender(
   const verificationOn = Boolean(callbacks.verification?.enabled !== false);
   const renderId = callbacks.verification?.renderId;
 
-  const requestedFps = Math.round(plan.frameRate) || 30;
-  const fps = Math.min(
-    BROWSER_CAPTURE_FPS_CAP,
-    Math.max(6, Math.min(requestedFps, BROWSER_CAPTURE_FPS_CAP)),
+  const requestedFps = Math.round(plan.frameRate) || 24;
+  const fps = Math.max(1, Math.min(requestedFps, BROWSER_CAPTURE_FPS_CEILING));
+  callbacks.onLog?.(
+    `Deterministic capture at Timeline frame rate: ${fps}fps (no sub-sampling).`,
   );
-  if (fps < requestedFps) {
-    callbacks.onLog?.(
-      `Composed capture uses ${fps}fps (requested ${requestedFps}) for speed.`,
-    );
-  }
 
   // Manual frame clocking: captureStream(0) emits exactly one frame per
   // requestFrame(), so slow painting cannot stretch or drop scene time.
@@ -331,6 +354,19 @@ export async function runBrowserTimelineRender(
     `Encoding ${totalFrames} frames (~${(plan.durationMs / 1000).toFixed(1)}s @ ${fps}fps)…`,
   );
 
+  const frameDebug = Boolean(
+    verificationOn && renderId && callbacks.verification?.allFrames,
+  );
+  if (frameDebug) {
+    callbacks.onLog?.(
+      `Frame Debug mode ON — writing every frame to debug/render/${renderId}/frames/`,
+    );
+  }
+  // Full per-frame telemetry in Frame Debug mode; otherwise once per Timeline
+  // second, so a 24fps render does not push thousands of lines into the UI log.
+  const logEveryNFrames = frameDebug ? 1 : Math.max(1, fps);
+  let lastLoggedSceneId: string | null | undefined;
+
   for (let i = 0; i < totalFrames; i += 1) {
     if (callbacks.shouldCancel()) {
       recorder.stop();
@@ -346,11 +382,40 @@ export async function runBrowserTimelineRender(
 
     const frameStarted = performance.now();
     const timeMs = Math.min(plan.durationMs - 1, Math.round(i * frameDuration));
-    await callbacks.capture.paintFrame(timeMs, canvas);
+    const report = (await callbacks.capture.paintFrame(timeMs, canvas)) || null;
 
     if (manualTrack) {
       manualTrack.requestFrame();
       emittedFrames += 1;
+    }
+
+    if (report) {
+      const sceneChanged = report.motionSceneId !== lastLoggedSceneId;
+      if (sceneChanged || i % logEveryNFrames === 0 || i === totalFrames - 1) {
+        lastLoggedSceneId = report.motionSceneId;
+        const videoPart =
+          report.videoTimeMs == null
+            ? "video —"
+            : `video ${(report.videoTimeMs / 1000).toFixed(2)}s`;
+        callbacks.onLog?.(
+          `Frame ${i + 1}/${totalFrames} · playhead ${timeMs}ms · ` +
+            `scene ${report.sceneName ?? report.motionSceneId?.slice(0, 8) ?? "—"} ` +
+            `@ ${report.scenePlayheadMs}ms · ` +
+            `layers ${report.layers} (shape ${report.shapeLayers}, ` +
+            `behaviour ${report.behaviourLayers}, motion ${report.motionLayers}) · ` +
+            `${videoPart} · raster ${report.rasterMode} ${report.rasterMs}ms`,
+        );
+      }
+    }
+
+    if (frameDebug && renderId) {
+      await saveRenderDebugFrame({
+        renderId,
+        label: frameDebugLabel(i + 1),
+        canvas,
+        format: "png",
+        subdir: "frames",
+      });
     }
 
     if (verificationOn && renderId) {

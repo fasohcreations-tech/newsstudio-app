@@ -25,6 +25,7 @@ import { useResolvedStoryBindings } from "@/features/story-production/hooks/use-
 import type { StoryPreviewAspect } from "@/features/story-production/types/story-data.types";
 import { extendComposerSceneForDuration } from "@/features/story-scene-builder/lib/extend-scene-duration";
 import { logVerify } from "@/features/video-render-export/lib/render-verification";
+import type { CaptureFrameReport } from "@/features/video-render-export/services/browser-render-worker";
 import type {
   RenderPlan,
   RenderPlanClip,
@@ -32,7 +33,10 @@ import type {
 
 export type ComposedSceneCaptureApi = {
   warmUp: (plan: RenderPlan) => Promise<void>;
-  paintFrame: (timeMs: number, dest: HTMLCanvasElement) => Promise<void>;
+  paintFrame: (
+    timeMs: number,
+    dest: HTMLCanvasElement,
+  ) => Promise<CaptureFrameReport>;
   verifyReadiness: (plan: RenderPlan) => Promise<void>;
 };
 
@@ -44,6 +48,13 @@ export const COMPOSED_CAPTURE_ENGINE = "dom-raster-v11-playback";
 
 /** Per-frame budget — a stalled rasterize must not hang the whole render. */
 const RASTER_TIMEOUT_MS = 8000;
+
+/**
+ * Must stay below one output frame (41ms at 24fps, 16ms at 60fps). The old
+ * 50–80ms thresholds skipped seeks entirely once capture ran at Timeline rate,
+ * which froze video playback across consecutive frames.
+ */
+const SEEK_EPSILON_SEC = 0.004;
 
 const rasterizer: {
   context: ScreenshotContext<HTMLElement> | null;
@@ -279,11 +290,14 @@ function isTransparentColor(color: string): boolean {
   );
 }
 
+/** Remote media still needing rematerialization, excluding known-dead assets. */
 function countHttpMedia(root: HTMLElement): number {
   let n = 0;
   root.querySelectorAll("img, video").forEach((node) => {
     const el = node as HTMLImageElement | HTMLVideoElement;
+    if (el.dataset.captureMediaFailed === "1") return;
     const src = (el.currentSrc || el.getAttribute("src") || "").trim();
+    if (!src || isMediaDead(src)) return;
     if (/^https?:\/\//i.test(src)) n += 1;
   });
   return n;
@@ -313,6 +327,60 @@ async function waitForVideosDecodable(
 /** Cache remote→blob so React re-renders don't force re-download. */
 const blobUrlCache = new Map<string, string>();
 
+const MAX_MEDIA_FETCH_ATTEMPTS = 3;
+
+/**
+ * Fetch attempts per media URL. Without this, an unreachable asset was retried
+ * on every single frame — at Timeline frame rate that added seconds per frame
+ * and hours to a render. A few attempts still absorb transient failures.
+ */
+const mediaFetchFailures = new Map<string, number>();
+/** Messages already surfaced this render, so failures log once, not per frame. */
+const loggedFailures = new Set<string>();
+
+function resetMediaFailureCache() {
+  mediaFetchFailures.clear();
+  loggedFailures.clear();
+}
+
+function isMediaDead(src: string): boolean {
+  return (mediaFetchFailures.get(src) ?? 0) >= MAX_MEDIA_FETCH_ATTEMPTS;
+}
+
+/** Records a failed attempt; returns true once the asset is given up on. */
+function noteMediaFailure(src: string): boolean {
+  const attempts = (mediaFetchFailures.get(src) ?? 0) + 1;
+  mediaFetchFailures.set(src, attempts);
+  return attempts >= MAX_MEDIA_FETCH_ATTEMPTS;
+}
+
+function logFailureOnce(
+  key: string,
+  message: string,
+  onLog?: (message: string) => void,
+) {
+  if (loggedFailures.has(key)) return;
+  loggedFailures.add(key);
+  onLog?.(message);
+}
+
+/** Transient dev-server hiccups surface as "Failed to fetch" — retry once. */
+async function fetchProxiedMedia(src: string): Promise<Response | null> {
+  const proxyUrl = `/api/render-media-proxy?url=${encodeURIComponent(src)}`;
+  for (let attempt = 0; attempt < 2; attempt += 1) {
+    try {
+      const res = await fetch(proxyUrl);
+      if (res.ok) return res;
+    } catch {
+      /* retry below */
+    }
+    if (attempt === 0) {
+      await new Promise((r) => window.setTimeout(r, 400));
+    }
+  }
+  return null;
+}
+
 /**
  * Rewrite remote img/video to same-origin blob: URLs so canvas stays origin-clean.
  */
@@ -327,15 +395,17 @@ async function rematerializeMediaToBlobUrls(
     const el = node as HTMLImageElement | HTMLVideoElement;
     const src = (el.currentSrc || el.getAttribute("src") || "").trim();
     if (!src || src.startsWith("blob:") || src.startsWith("data:")) continue;
+    if (isMediaDead(src)) {
+      el.dataset.captureMediaFailed = "1";
+      continue;
+    }
 
     try {
       let objUrl = blobUrlCache.get(src);
       if (!objUrl) {
         let res: Response | null = null;
         if (/^https?:\/\//i.test(src)) {
-          res = await fetch(
-            `/api/render-media-proxy?url=${encodeURIComponent(src)}`,
-          );
+          res = await fetchProxiedMedia(src);
         }
         if (!res?.ok) {
           try {
@@ -345,9 +415,14 @@ async function rematerializeMediaToBlobUrls(
           }
         }
         if (!res?.ok) {
-          onLog?.(
-            `Media rematerialize skipped (${res?.status ?? "fetch"}): ${src.slice(0, 64)}`,
-          );
+          if (noteMediaFailure(src)) {
+            el.dataset.captureMediaFailed = "1";
+            logFailureOnce(
+              src,
+              `Media unavailable (${res?.status ?? "fetch failed"}) — skipped for this render: ${src.slice(0, 96)}`,
+              onLog,
+            );
+          }
           continue;
         }
         const blob = await res.blob();
@@ -397,10 +472,18 @@ async function rematerializeMediaToBlobUrls(
         }
       }
       el.dataset.captureBlob = objUrl!;
+      delete el.dataset.captureMediaFailed;
       converted += 1;
     } catch (err) {
       const detail = err instanceof Error ? err.message : String(err);
-      onLog?.(`Media rematerialize failed: ${detail}`);
+      if (noteMediaFailure(src)) {
+        el.dataset.captureMediaFailed = "1";
+        logFailureOnce(
+          src,
+          `Media rematerialize failed (${detail}) — skipped for this render: ${src.slice(0, 96)}`,
+          onLog,
+        );
+      }
     }
   }
 
@@ -433,7 +516,9 @@ async function syncVideosToPlayhead(
       Math.max(0, localPlayheadMs / 1000),
       Math.max(0, duration - 0.04),
     );
-    if (Math.abs(video.currentTime - target) < 0.05) return Promise.resolve();
+    if (Math.abs(video.currentTime - target) < SEEK_EPSILON_SEC) {
+      return Promise.resolve();
+    }
     return new Promise<void>((resolve) => {
       const done = () => {
         video.removeEventListener("seeked", done);
@@ -561,7 +646,7 @@ async function seekPlanVideo(
     Math.max(0, timeSec),
     Math.max(0, duration - 0.04),
   );
-  if (Math.abs(video.currentTime - target) < 0.08) return;
+  if (Math.abs(video.currentTime - target) < SEEK_EPSILON_SEC) return;
 
   await new Promise<void>((resolve) => {
     const done = () => {
@@ -1026,7 +1111,8 @@ async function paintArtboardLive(
   width: number,
   height: number,
   onLog?: (message: string) => void,
-): Promise<"dom-raster" | "layer-blit"> {
+): Promise<{ mode: "dom-raster" | "layer-blit"; ms: number }> {
+  const paintStartedAt = performance.now();
   if (!rasterizer.disabled) {
     try {
       const startedAt = performance.now();
@@ -1056,7 +1142,7 @@ async function paintArtboardLive(
           `Frame paint: DOM rasterizer active (full CSS fidelity, ${rasterMs}ms first frame).`,
         );
       }
-      return "dom-raster";
+      return { mode: "dom-raster", ms: rasterMs };
     } catch (err) {
       const detail = err instanceof Error ? err.message : String(err);
       rasterizer.fails += 1;
@@ -1072,7 +1158,10 @@ async function paintArtboardLive(
   }
 
   blitFullArtboard(root, dest, width, height, onLog);
-  return "layer-blit";
+  return {
+    mode: "layer-blit",
+    ms: Math.round(performance.now() - paintStartedAt),
+  };
 }
 
 export const ComposedSceneCaptureHost = forwardRef<
@@ -1085,6 +1174,7 @@ export const ComposedSceneCaptureHost = forwardRef<
   const artboardRef = useRef<HTMLDivElement>(null);
   const planVideoRef = useRef<HTMLVideoElement | null>(null);
   const planVideoUrlRef = useRef<string | null>(null);
+  const planImageCacheRef = useRef(new Map<string, HTMLImageElement>());
   const cacheRef = useRef<Record<string, ComposerScene>>({});
   const lastMotionIdRef = useRef<string | null>(null);
   const lastClipIdRef = useRef<string | null>(null);
@@ -1128,13 +1218,16 @@ export const ComposedSceneCaptureHost = forwardRef<
       return video;
     }
 
+    if (isMediaDead(url)) {
+      throw new Error("Plan video unavailable (skipped for this render)");
+    }
+
     let objUrl = blobUrlCache.get(url);
     if (!objUrl) {
-      const res = await fetch(
-        `/api/render-media-proxy?url=${encodeURIComponent(url)}`,
-      );
-      if (!res.ok) {
-        throw new Error(`Plan video proxy failed (${res.status})`);
+      const res = await fetchProxiedMedia(url);
+      if (!res) {
+        noteMediaFailure(url);
+        throw new Error("Plan video proxy failed (fetch)");
       }
       objUrl = URL.createObjectURL(await res.blob());
       blobUrlCache.set(url, objUrl);
@@ -1157,6 +1250,20 @@ export const ComposedSceneCaptureHost = forwardRef<
       logRef.current?.("Plan video loaded but has no dimensions yet");
     }
     return video;
+  }, []);
+
+  /** Decode a plan still once and reuse it — re-decoding per frame is wasted work. */
+  const ensurePlanImage = useCallback(async (objUrl: string) => {
+    const cached = planImageCacheRef.current.get(objUrl);
+    if (cached) return cached;
+    const img = await new Promise<HTMLImageElement>((resolve, reject) => {
+      const el = new Image();
+      el.onload = () => resolve(el);
+      el.onerror = () => reject(new Error("image load failed"));
+      el.src = objUrl;
+    });
+    planImageCacheRef.current.set(objUrl, img);
+    return img;
   }, []);
 
   const rematerialize = useCallback(async () => {
@@ -1242,6 +1349,7 @@ export const ComposedSceneCaptureHost = forwardRef<
     async (next: RenderPlan) => {
       planRef.current = next;
       resetRasterizer();
+      resetMediaFailureCache();
       // Clocks stay off until verifyReadiness finishes the READY gate.
       flushSync(() => {
         setRuntimePlaying(false);
@@ -1544,7 +1652,10 @@ export const ComposedSceneCaptureHost = forwardRef<
   );
 
   const paintFrame = useCallback(
-    async (timeMs: number, dest: HTMLCanvasElement) => {
+    async (
+      timeMs: number,
+      dest: HTMLCanvasElement,
+    ): Promise<CaptureFrameReport> => {
       const activePlan = planRef.current;
       if (!activePlan) throw new Error("Capture host not warmed up");
 
@@ -1581,20 +1692,22 @@ export const ComposedSceneCaptureHost = forwardRef<
 
       await syncVideosToPlayhead(artboardEl, offset);
 
-      const paintMode = await paintArtboardLive(
+      const paint = await paintArtboardLive(
         artboardEl,
         dest,
         activePlan.width,
         activePlan.height,
         (m) => logRef.current?.(m),
       );
-      void paintMode;
+
+      let videoTimeMs: number | null = null;
 
       // Reliable main-stage fill from the render plan (not fragile in-DOM video).
       if (clip?.videoUrl) {
         try {
           const planVideo = await ensurePlanVideo(clip.videoUrl);
           await seekPlanVideo(planVideo, offset / 1000);
+          videoTimeMs = Math.round(planVideo.currentTime * 1000);
           paintMainVideoFromElement(
             artboardEl,
             dest,
@@ -1605,27 +1718,30 @@ export const ComposedSceneCaptureHost = forwardRef<
           );
         } catch (err) {
           const detail = err instanceof Error ? err.message : String(err);
-          logRef.current?.(`Plan video paint failed: ${detail}`);
+          logFailureOnce(
+            `plan-video:${clip.videoUrl}`,
+            `Plan video paint failed (${detail}) — main stage falls back to the scene layer.`,
+            (m) => logRef.current?.(m),
+          );
         }
       } else if (clip?.imageUrl) {
         try {
+          if (isMediaDead(clip.imageUrl)) {
+            throw new Error("Plan image unavailable (skipped for this render)");
+          }
           let objUrl = blobUrlCache.get(clip.imageUrl);
           if (!objUrl) {
-            const res = await fetch(
-              `/api/render-media-proxy?url=${encodeURIComponent(clip.imageUrl)}`,
-            );
-            if (res.ok) {
+            const res = await fetchProxiedMedia(clip.imageUrl);
+            if (res) {
               objUrl = URL.createObjectURL(await res.blob());
               blobUrlCache.set(clip.imageUrl, objUrl);
+            } else {
+              noteMediaFailure(clip.imageUrl);
+              throw new Error("Plan image proxy failed (fetch)");
             }
           }
-          if (objUrl) {
-            const img = await new Promise<HTMLImageElement>((resolve, reject) => {
-              const el = new Image();
-              el.onload = () => resolve(el);
-              el.onerror = () => reject(new Error("image load failed"));
-              el.src = objUrl!;
-            });
+          {
+            const img = await ensurePlanImage(objUrl);
             const ctx = dest.getContext("2d", { alpha: false });
             const hole =
               (artboardEl.querySelector(
@@ -1648,14 +1764,35 @@ export const ComposedSceneCaptureHost = forwardRef<
           }
         } catch (err) {
           const detail = err instanceof Error ? err.message : String(err);
-          logRef.current?.(`Plan image paint failed: ${detail}`);
+          logFailureOnce(
+            `plan-image:${clip.imageUrl}`,
+            `Plan image paint failed (${detail}) — main stage falls back to the scene layer.`,
+            (m) => logRef.current?.(m),
+          );
         }
       }
 
       // Do not overlay static region text — that stomped ticker/layer motion.
       // StoryLivePreview DOM blit is the single animation source of truth.
+
+      const activeScene = clip?.motionSceneId
+        ? (cacheRef.current[clip.motionSceneId] ?? null)
+        : null;
+      const inventory = inventorySceneRuntime(activeScene);
+      return {
+        sceneName: activeScene?.name ?? clip?.name ?? null,
+        motionSceneId: clip?.motionSceneId ?? null,
+        scenePlayheadMs: offset,
+        layers: inventory.layers,
+        shapeLayers: inventory.shapesEnabled,
+        behaviourLayers: inventory.behavioursEnabled,
+        motionLayers: inventory.motionLayers,
+        videoTimeMs,
+        rasterMode: paint.mode,
+        rasterMs: paint.ms,
+      };
     },
-    [applyClip, rematerialize, ensurePlanVideo, runtimePlaying],
+    [applyClip, rematerialize, ensurePlanVideo, ensurePlanImage, runtimePlaying],
   );
 
   useImperativeHandle(
@@ -1700,6 +1837,11 @@ export const ComposedSceneCaptureHost = forwardRef<
       >
         {previewComposer ? (
           <StoryLivePreview
+            // Remount per scene (same as StoryTimelinePreview). Without this,
+            // per-layer animation state — shape reveal progress, edge sweep
+            // "once" completion — leaks from the previous scene and its
+            // entrance animations never replay after the first cut.
+            key={previewComposer.id}
             scene={previewComposer}
             resolvedBindings={bindings}
             playheadMs={scenePlayheadMs}

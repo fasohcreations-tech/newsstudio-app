@@ -15,6 +15,7 @@ export const exportSettingsSchema = z.object({
   bitrateKbps: z.number().int().min(500).max(100_000),
   includeVoice: z.boolean(),
   includeMusic: z.boolean(),
+  previewScope: z.enum(["full", "shortest"]).optional(),
 });
 
 export const createVideoRenderSchema = z.object({

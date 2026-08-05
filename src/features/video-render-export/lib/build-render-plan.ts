@@ -87,10 +87,22 @@ export function buildRenderPlan(input: {
     };
   });
 
-  const durationMs = Math.max(
-    input.bundle.timeline.duration_ms,
-    planClips.reduce((max, c) => Math.max(max, c.endMs), 0),
-  );
+  // Scoped test render: keep the shortest clip and rebase it to the timeline
+  // origin so the capture, the FFmpeg duration and the voice offset all agree.
+  const shortest =
+    input.settings.previewScope === "shortest" && planClips.length > 0
+      ? planClips.reduce((min, c) => (c.durationMs < min.durationMs ? c : min))
+      : null;
+  const effectiveClips = shortest
+    ? [{ ...shortest, startMs: 0, endMs: shortest.durationMs }]
+    : planClips;
+
+  const durationMs = shortest
+    ? shortest.durationMs
+    : Math.max(
+        input.bundle.timeline.duration_ms,
+        effectiveClips.reduce((max, c) => Math.max(max, c.endMs), 0),
+      );
 
   return {
     version: 1,
@@ -104,7 +116,7 @@ export function buildRenderPlan(input: {
     bitrateKbps: input.settings.bitrateKbps,
     voiceUrl: input.settings.includeVoice ? input.voiceUrl : null,
     musicUrl: input.settings.includeMusic ? input.musicUrl : null,
-    clips: planClips,
+    clips: effectiveClips,
     builtAt: new Date().toISOString(),
   };
 }

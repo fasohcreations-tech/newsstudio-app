@@ -32,7 +32,12 @@ type Gnn001MainVideoContainerPropsInput = {
    * shape rim / mask owns the look (otherwise video chrome hides shape work).
    */
   suppressFrameChrome?: boolean;
+  /** Timeline clock — drives the slideshow during playback / render. */
+  clockMs?: number;
+  isPlaying?: boolean;
 };
+
+const SLIDESHOW_INTERVAL_MS = 4000;
 
 function normalizeFit(fit: Gnn001VideoFit | string): Gnn001VideoFit {
   if (fit === "cover") return "fill";
@@ -107,6 +112,8 @@ export function Gnn001MainVideoContainer({
   onSelect,
   onBrowseMedia,
   suppressFrameChrome = false,
+  clockMs = 0,
+  isPlaying = false,
 }: Gnn001MainVideoContainerPropsInput) {
   const resolved = {
     ...resolveGnn001MainVideoProps(content, bindings),
@@ -132,17 +139,25 @@ export function Gnn001MainVideoContainer({
   }, [bindings.gallery_images]);
 
   useEffect(() => {
+    // Playback / render derives the slide from the timeline instead, so a slow
+    // capture cannot advance the gallery at wall-clock speed.
+    if (isPlaying) return;
     if (resolved.media_mode !== "slideshow" || galleryLength <= 1) return;
     const timer = window.setInterval(() => {
       setSlideshowIndex((index) => (index + 1) % galleryLength);
-    }, 4000);
+    }, SLIDESHOW_INTERVAL_MS);
     return () => window.clearInterval(timer);
-  }, [resolved.media_mode, galleryLength]);
+  }, [resolved.media_mode, galleryLength, isPlaying]);
+
+  const activeSlideIndex =
+    isPlaying && galleryLength > 1
+      ? Math.floor(Math.max(0, clockMs) / SLIDESHOW_INTERVAL_MS) % galleryLength
+      : slideshowIndex;
 
   const mediaUrl = resolveMediaUrl(
     resolved.media_mode,
     bindings,
-    slideshowIndex,
+    activeSlideIndex,
   );
 
   const isFullscreen = resolved.container_state === "fullscreen";
