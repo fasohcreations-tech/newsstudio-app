@@ -27,7 +27,7 @@ export type CaptureFrameReport = {
   behaviourLayers: number;
   motionLayers: number;
   videoTimeMs: number | null;
-  rasterMode: "dom-raster" | "layer-blit";
+  rasterMode: "dom-raster" | "layer-blit" | "canvas-runtime";
   rasterMs: number;
 };
 

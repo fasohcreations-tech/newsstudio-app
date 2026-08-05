@@ -36,6 +36,8 @@ import {
   COMPOSED_CAPTURE_ENGINE,
   type ComposedSceneCaptureApi,
 } from "@/features/video-render-export/components/composed-scene-capture-host";
+import { CanvasSceneCaptureHost } from "@/features/video-render-export/components/canvas-scene-capture-host";
+import { COMPOSED_CAPTURE_ENGINE_V2 } from "@/features/video-render-export/services/canvas-capture-session";
 import { VideoExportDialog } from "@/features/video-render-export/components/video-export-dialog";
 import { VideoRenderQueue } from "@/features/video-render-export/components/video-render-queue";
 import { DEFAULT_EXPORT_SETTINGS } from "@/features/video-render-export/constants/render.constants";
@@ -46,6 +48,11 @@ import type {
   VideoExportSettings,
   VideoRenderRow,
 } from "@/features/video-render-export/types/render.types";
+import {
+  DEFAULT_RENDER_BACKEND,
+  resolveRenderBackend,
+  type RenderBackendId,
+} from "@mediaos/render-engine";
 import { cn } from "@/lib/utils";
 
 type VideoRenderExportPanelProps = {
@@ -67,6 +74,7 @@ type EncodeLogLine = {
 
 const PROVIDER_STORAGE_KEY = "mediaos.renderProvider";
 const FRAME_DEBUG_STORAGE_KEY = "mediaos.renderFrameDebug";
+const RENDER_BACKEND_STORAGE_KEY = "mediaos.renderBackend";
 const MAX_LOG_LINES = 400;
 
 /**
@@ -89,6 +97,9 @@ export function VideoRenderExportPanel({
   const [frameDebug, setFrameDebug] = useState(false);
   const frameDebugRef = useRef(false);
   frameDebugRef.current = frameDebug;
+  const [renderBackend, setRenderBackend] = useState<RenderBackendId>(
+    DEFAULT_RENDER_BACKEND,
+  );
   const [panelTab, setPanelTab] = useState<"queue" | "log">("queue");
   const [encodeLogs, setEncodeLogs] = useState<EncodeLogLine[]>([]);
   const localFilesRef = useRef<Record<string, LocalFileEntry>>({});
@@ -135,6 +146,11 @@ export function VideoRenderExportPanel({
       setFrameDebug(
         window.localStorage.getItem(FRAME_DEBUG_STORAGE_KEY) === "1",
       );
+      setRenderBackend(
+        resolveRenderBackend(
+          window.localStorage.getItem(RENDER_BACKEND_STORAGE_KEY),
+        ),
+      );
     } catch {
       /* ignore */
     }
@@ -172,6 +188,18 @@ export function VideoRenderExportPanel({
     appendLog(`Frame Debug mode ${next ? "enabled" : "disabled"}`);
     try {
       window.localStorage.setItem(FRAME_DEBUG_STORAGE_KEY, next ? "1" : "0");
+    } catch {
+      /* ignore */
+    }
+  }
+
+  function chooseRenderBackend(next: RenderBackendId) {
+    setRenderBackend(next);
+    appendLog(
+      `Render backend → ${next === "canvas" ? "Canvas Runtime V2" : "DOM Legacy"}`,
+    );
+    try {
+      window.localStorage.setItem(RENDER_BACKEND_STORAGE_KEY, next);
     } catch {
       /* ignore */
     }
@@ -216,7 +244,13 @@ export function VideoRenderExportPanel({
     appendLog(
       `Job ${job.id.slice(0, 8)} — capturing assembled Motion Scenes…`,
     );
-    appendLog(`Capture engine: ${COMPOSED_CAPTURE_ENGINE}`);
+    appendLog(
+      `Capture engine: ${
+        renderBackend === "canvas"
+          ? COMPOSED_CAPTURE_ENGINE_V2
+          : COMPOSED_CAPTURE_ENGINE
+      }`,
+    );
     appendLog("── Stage 1: Timeline → clips");
     const plan = job.render_plan;
     if (plan.clips.length === 1) {
@@ -560,7 +594,19 @@ export function VideoRenderExportPanel({
 
   return (
     <Card className="border-border/60">
-      <ComposedSceneCaptureHost ref={captureRef} onLog={appendLog} />
+      {renderBackend === "canvas" ? (
+        <CanvasSceneCaptureHost
+          key="canvas-v2"
+          ref={captureRef}
+          onLog={appendLog}
+        />
+      ) : (
+        <ComposedSceneCaptureHost
+          key="dom-legacy"
+          ref={captureRef}
+          onLog={appendLog}
+        />
+      )}
       <CardHeader>
         <div className="flex flex-wrap items-start justify-between gap-3">
           <div>
@@ -569,7 +615,7 @@ export function VideoRenderExportPanel({
               Video Rendering & Export
             </CardTitle>
             <CardDescription>
-              Module 3.1 — render the production Timeline for{" "}
+              Module 3.1 + 4.0 — render the production Timeline for{" "}
               <strong>{storyTitle}</strong>. Non-destructive to Story, Panels,
               Scenes, and Timeline.
             </CardDescription>
@@ -593,13 +639,52 @@ export function VideoRenderExportPanel({
       <CardContent className="space-y-4">
         <div className="space-y-2 rounded-lg border border-border/60 p-3">
           <div className="flex flex-wrap items-center justify-between gap-2">
-            <Label className="text-sm font-medium">Render engine</Label>
+            <Label className="text-sm font-medium">Render backend</Label>
             {envDefault ? (
               <span className="text-[11px] text-muted-foreground">
-                Env default: <code>{envDefault}</code>
+                Encoder env default: <code>{envDefault}</code>
               </span>
             ) : null}
           </div>
+          <div className="grid grid-cols-2 gap-2">
+            <button
+              type="button"
+              disabled={Boolean(activeRenderId)}
+              onClick={() => chooseRenderBackend("canvas")}
+              className={cn(
+                "flex items-start gap-2 rounded-md border px-3 py-2 text-left text-xs transition-colors",
+                renderBackend === "canvas"
+                  ? "border-foreground/30 bg-muted"
+                  : "border-border/60 hover:bg-muted/50",
+              )}
+            >
+              <span>
+                <span className="block font-medium">Canvas Renderer (V2)</span>
+                <span className="text-muted-foreground">
+                  Scene Runtime → Canvas2D · default · no DOM raster
+                </span>
+              </span>
+            </button>
+            <button
+              type="button"
+              disabled={Boolean(activeRenderId)}
+              onClick={() => chooseRenderBackend("dom")}
+              className={cn(
+                "flex items-start gap-2 rounded-md border px-3 py-2 text-left text-xs transition-colors",
+                renderBackend === "dom"
+                  ? "border-foreground/30 bg-muted"
+                  : "border-border/60 hover:bg-muted/50",
+              )}
+            >
+              <span>
+                <span className="block font-medium">DOM Renderer (Legacy)</span>
+                <span className="text-muted-foreground">
+                  StoryLivePreview → screenshot · proof of concept
+                </span>
+              </span>
+            </button>
+          </div>
+
           <div className="grid grid-cols-2 gap-2">
             <button
               type="button"
@@ -668,9 +753,17 @@ export function VideoRenderExportPanel({
           <AlertDescription className="text-xs">
             {provider === "local" ? (
               <>
-                Captures assembled Motion Scenes, rematerializes media via a
-                same-origin proxy (avoids canvas CORS taint), then FFmpeg muxes
-                voice. Watch the <strong>Log</strong> tab for encode updates.
+                Backend:{" "}
+                <strong>
+                  {renderBackend === "canvas"
+                    ? "Canvas Runtime V2"
+                    : "DOM Legacy"}
+                </strong>
+                .{" "}
+                {renderBackend === "canvas"
+                  ? "Scene Runtime draws each Timeline frame to Canvas2D (no React/DOM raster). FFmpeg muxes voice."
+                  : "Captures StoryLivePreview via DOM rasterizer, then FFmpeg muxes voice."}{" "}
+                Watch the <strong>Log</strong> tab for encode updates.
               </>
             ) : (
               <>

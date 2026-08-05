@@ -19,7 +19,9 @@
       }
     ],
     "paths": {
-      "@/*": ["./src/*"]
+      "@/*": ["./src/*"],
+      "@mediaos/render-engine": ["./packages/render-engine/src/index.ts"],
+      "@mediaos/render-engine/*": ["./packages/render-engine/src/*"]
     }
   },
   "include": ["next-env.d.ts", "**/*.ts", "**/*.tsx", ".next/types/**/*.ts"],
