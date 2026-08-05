@@ -4,6 +4,7 @@ import {
   Clapperboard,
   Inbox,
   LayoutDashboard,
+  LayoutTemplate,
   Library,
   Newspaper,
   Radio,
@@ -55,6 +56,12 @@ export const APP_NAV_ITEMS: AppNavItem[] = [
     href: "/creative-studio",
     icon: Wand2,
     description: "Posters, thumbnails, and design",
+  },
+  {
+    title: "Templates",
+    href: "/templates",
+    icon: LayoutTemplate,
+    description: "Professional broadcast template designer",
   },
   {
     title: "Publishing",
