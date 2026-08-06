@@ -28,9 +28,10 @@ const FIELD_TARGETS: Record<string, StoryMediaTarget> = {
   background_video: {
     field: "background_video",
     bindingKey: "background_video",
-    label: "Background Video",
+    label: "Background Slides",
     kind: "video",
-    accept: "video/*",
+    // Picker shows videos + images; each pick appends to the slide queue.
+    accept: "video/*,image/*",
   },
   main_image: {
     field: "main_image",
@@ -131,6 +132,17 @@ export function mediaTargetFromBindingKey(
   return FIELD_TARGETS[bindingKey] ?? null;
 }
 
+function isBackgroundLayerObject(object: SceneObject): boolean {
+  return (
+    object.metadata?.layer === "background" ||
+    object.metadata?.component_kind === "background" ||
+    object.metadata?.generator === "background" ||
+    object.name === "Background" ||
+    (typeof object.metadata?.component_slug === "string" &&
+      object.metadata.component_slug.includes("background"))
+  );
+}
+
 export function resolveMediaTargetForObject(
   object: SceneObject | null | undefined,
 ): StoryMediaTarget | null {
@@ -142,6 +154,20 @@ export function resolveMediaTargetForObject(
     object.name === "Main Video Container"
   ) {
     return FIELD_TARGETS.main_video;
+  }
+
+  // Layers-panel Background / Smart Container — image or video slide queue.
+  if (isBackgroundLayerObject(object)) {
+    return FIELD_TARGETS.background_video;
+  }
+
+  if (
+    object.metadata?.role === "smart_container" ||
+    object.metadata?.container_kind === "smart" ||
+    object.metadata?.layer_kind === "smart_container" ||
+    object.name === "Smart Container"
+  ) {
+    return FIELD_TARGETS.background_video;
   }
 
   if (
@@ -188,4 +214,20 @@ export function defaultTargetForAssetCategory(
   if (category === "voice_over") return FIELD_TARGETS.voice_over;
   if (category === "music") return FIELD_TARGETS.background_music;
   return FIELD_TARGETS.main_image;
+}
+
+/**
+ * Pick the Story field to write for a media target.
+ * Background browse always writes `background_video` (image or video) —
+ * same pattern as main video — so demo/sibling fields cannot shadow the pick.
+ */
+export function resolveApplyFieldForTarget(
+  target: StoryMediaTarget,
+  _mimeType?: string,
+  _url?: string,
+): keyof StoryDataRecord {
+  if (target.bindingKey === "background_video") {
+    return "background_video";
+  }
+  return target.field;
 }

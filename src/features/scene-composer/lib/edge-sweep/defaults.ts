@@ -6,6 +6,16 @@ import type {
 export function createDefaultEdgeSweep(
   partial?: Partial<EdgeSweepConfig>,
 ): EdgeSweepConfig {
+  const margins =
+    partial?.margins == null
+      ? null
+      : {
+          top: Number(partial.margins.top) || 0,
+          right: Number(partial.margins.right) || 0,
+          bottom: Number(partial.margins.bottom) || 0,
+          left: Number(partial.margins.left) || 0,
+        };
+
   return {
     version: 1,
     enabled: false,
@@ -24,7 +34,11 @@ export function createDefaultEdgeSweep(
     glowIntensity: 0.55,
     trailLength: 0.55,
     trailFade: 0.55,
+    margin: 0,
     ...partial,
+    version: 1,
+    margin: Number.isFinite(partial?.margin) ? Number(partial?.margin) : 0,
+    margins,
   };
 }
 

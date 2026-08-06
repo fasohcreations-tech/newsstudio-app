@@ -333,6 +333,63 @@ export function LayerBehaviorsPanel({
               step={0.05}
               onChange={(speed) => patch({ speed })}
             />
+            <NumberField
+              label="Margin"
+              value={
+                config.margins
+                  ? (config.margins.top +
+                      config.margins.right +
+                      config.margins.bottom +
+                      config.margins.left) /
+                    4
+                  : config.margin
+              }
+              min={-40}
+              max={80}
+              step={1}
+              onChange={(margin) =>
+                patch({
+                  margin,
+                  margins: null,
+                })
+              }
+            />
+            <p className={`${EDITOR_UI.helper} col-span-2`}>
+              Margin pulls the sweep path in from the item edges (negative =
+              outside). Use per-side fields to offset one edge only.
+            </p>
+            <NumberField
+              label="Margin Top"
+              value={config.margins?.top ?? config.margin}
+              min={-40}
+              max={80}
+              step={1}
+              onChange={(top) => patch({ margins: { top } })}
+            />
+            <NumberField
+              label="Margin Right"
+              value={config.margins?.right ?? config.margin}
+              min={-40}
+              max={80}
+              step={1}
+              onChange={(right) => patch({ margins: { right } })}
+            />
+            <NumberField
+              label="Margin Bottom"
+              value={config.margins?.bottom ?? config.margin}
+              min={-40}
+              max={80}
+              step={1}
+              onChange={(bottom) => patch({ margins: { bottom } })}
+            />
+            <NumberField
+              label="Margin Left"
+              value={config.margins?.left ?? config.margin}
+              min={-40}
+              max={80}
+              step={1}
+              onChange={(left) => patch({ margins: { left } })}
+            />
             <Field label="Direction">
               <Select
                 value={config.direction}

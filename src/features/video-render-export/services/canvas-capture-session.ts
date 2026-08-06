@@ -7,10 +7,20 @@ import { getComposerSceneAction } from "@/features/scene-composer/actions/scene-
 import {
   findLowerInfoPanelObject,
   getObjectEffectStack,
+  normalizeLightSweepParams,
   resolveHeadlineLightSweepCoverage,
+  resolveLightSweepAngle,
   sampleBroadcastEffects,
 } from "@/features/scene-composer/lib/broadcast-effects";
-import { getEdgeSweepConfig } from "@/features/scene-composer/lib/edge-sweep";
+import {
+  getEdgeSweepConfig,
+  resolveEdgeSweepSideMargins,
+} from "@/features/scene-composer/lib/edge-sweep";
+import {
+  getShapeConfig,
+  resolveObjectShapeOutline,
+  sampleShapePerimeter,
+} from "@/features/scene-composer/lib/shape-composer";
 import { sampleLayerMotion } from "@/features/scene-composer/lib/motion-animation";
 import {
   getShapeConfig,
@@ -249,7 +259,7 @@ function createMediaOsSamplers(scenes: Record<string, ComposerScene>) {
     const overlays = sampleBroadcastEffects(getObjectEffectStack(obj)).overlays;
     const lightOverlay = overlays.find((o) => o.kind === "light_sweep");
     if (lightOverlay && lightOverlay.kind === "light_sweep") {
-      const p = lightOverlay.params;
+      const p = normalizeLightSweepParams(lightOverlay.params);
       // Same phase math as BroadcastEffectOverlays.lightSweepProgress so the
       // render and the preview agree frame for frame.
       const cycleMs = Math.max(400, 1000 / Math.max(0.05, p.speed));
@@ -272,10 +282,14 @@ function createMediaOsSamplers(scenes: Record<string, ComposerScene>) {
         (sceneId ? scenes[sceneId]?.composer_document?.objects : null) ?? [];
       const lowerPanel = findLowerInfoPanelObject(sceneObjects) ?? null;
       const cov = resolveHeadlineLightSweepCoverage(obj, lowerPanel);
+      const shapeOutline = resolveObjectShapeOutline(obj);
+      const useShapeOutline = Boolean(shapeOutline && !shapeOutline.rectLike);
 
       light = {
         progress,
-        angle: p.angle,
+        angle: resolveLightSweepAngle(p),
+        start: p.start,
+        end: p.end,
         width: p.width,
         opacity: p.opacity,
         softness: p.softness,
@@ -289,6 +303,9 @@ function createMediaOsSamplers(scenes: Record<string, ComposerScene>) {
               height: cov.height,
             }
           : null,
+        outlinePath: useShapeOutline ? shapeOutline!.localD : null,
+        outlineOffsetX: useShapeOutline ? shapeOutline!.offsetX : 0,
+        outlineOffsetY: useShapeOutline ? shapeOutline!.offsetY : 0,
       };
     }
 
@@ -304,6 +321,17 @@ function createMediaOsSamplers(scenes: Record<string, ComposerScene>) {
       const raw = t / periodMs;
       const done = once && playheadMs > periodMs;
       if (!done) {
+        const margins = resolveEdgeSweepSideMargins(cfg);
+        const outline = resolveObjectShapeOutline(obj);
+        const outlinePoints =
+          outline && !outline.rectLike
+            ? sampleShapePerimeter(
+                getShapeConfig(obj),
+                obj.transform.width,
+                obj.transform.height,
+                128,
+              )
+            : null;
         edge = {
           progress: cfg.direction === "counterclockwise" ? 1 - raw : raw,
           color: cfg.color,
@@ -318,6 +346,11 @@ function createMediaOsSamplers(scenes: Record<string, ComposerScene>) {
               : (cfg.cornerRadius ?? Number(obj.style?.corner_radius ?? 0) ?? 0),
           trailLength: Math.max(0, cfg.trailLength),
           blendMode: cfg.blendMode ?? "normal",
+          marginTop: margins.top,
+          marginRight: margins.right,
+          marginBottom: margins.bottom,
+          marginLeft: margins.left,
+          outlinePoints,
         };
       }
     }

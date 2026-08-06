@@ -28,6 +28,23 @@ export function isMainVideoContainerObject(object: SceneObject): boolean {
   );
 }
 
+export function isPureShapeObjectType(objectType: string): boolean {
+  return [
+    "rectangle",
+    "rounded_rectangle",
+    "circle",
+    "ellipse",
+    "line",
+    "polygon",
+    "gradient",
+    "svg",
+    "mask",
+    "triangle",
+    "star",
+    "arrow",
+  ].includes(objectType);
+}
+
 /** Main video must use a rectangular rim — never an inscribed ellipse/circle. */
 export function normalizeMainVideoFrameShape(
   config: ShapeComposerConfig,
@@ -165,10 +182,16 @@ export function enableShapeComposer(object: SceneObject): SceneObject {
     return object;
   }
   const isVideoContainer = isMainVideoContainerObject(object);
+  const isTextLike = ["text", "rich_text", "ticker", "clock", "date"].includes(
+    object.object_type,
+  );
+  // Text: Shape is optional chrome behind glyphs — reveal stays off unless
+  // the designer already turned it on. Video/shapes keep intro→exit reveal.
   const reveal = createDefaultReveal({
     ...current.reveal,
-    // Same as other layers: shape intro → exit → reveal video.
-    enabled: current.reveal?.enabled !== false,
+    enabled: isTextLike
+      ? current.reveal?.enabled === true
+      : current.reveal?.enabled !== false,
   });
   const baseBehaviors =
     current.behaviors.length > 0
@@ -194,6 +217,59 @@ export function enableShapeComposer(object: SceneObject): SceneObject {
         object,
       ),
     );
+  }
+
+  if (isTextLike) {
+    return setShapeConfig(object, {
+      ...current,
+      enabled: true,
+      hidden: false,
+      reveal,
+      behaviors: reveal.enabled ? behaviors : [],
+      strokeStyle:
+        current.strokeStyle === "none" ? "solid" : current.strokeStyle,
+      strokeWidth: Math.max(0, current.strokeWidth || 0),
+      strokeColor: current.strokeColor || "#5B8DEF",
+      fill:
+        !current.fill || current.fill === "transparent"
+          ? "rgba(99,102,241,0.45)"
+          : current.fill,
+      fillMode: current.fillMode === "none" ? "solid" : current.fillMode,
+    });
+  }
+
+  // Pure shape layers (rect/ellipse/…): keep Reveal off so attributes stay
+  // visible in the editor without pressing Preview.
+  if (isPureShapeObjectType(object.object_type)) {
+    const shapeReveal = createDefaultReveal({
+      ...current.reveal,
+      enabled: current.reveal?.enabled === true,
+    });
+    return setShapeConfig(object, {
+      ...current,
+      enabled: true,
+      hidden: false,
+      reveal: shapeReveal,
+      behaviors: shapeReveal.enabled
+        ? syncRevealExitBehavior(
+            current.behaviors.length > 0
+              ? current.behaviors
+              : [defaultRevealEntranceBehavior()],
+            shapeReveal,
+          )
+        : [],
+      strokeStyle:
+        current.strokeStyle === "none" ? "solid" : current.strokeStyle,
+      strokeWidth: Math.max(2, current.strokeWidth || 0),
+      strokeColor: current.strokeColor || "#5B8DEF",
+      fill: layerFillColor(
+        object,
+        !current.fill || current.fill === "transparent"
+          ? "rgba(99,102,241,0.85)"
+          : current.fill,
+      ),
+      fillMode: current.fillMode === "none" ? "solid" : current.fillMode,
+    });
   }
 
   return setShapeConfig(object, {
@@ -240,8 +316,34 @@ export function areShapesEnabledOnAllLayers(objects: SceneObject[]): boolean {
 }
 
 export function needsShapeComposerSeed(objects: SceneObject[]): boolean {
-  // Only fill missing shape config — never strip existing Shape Composer data.
-  return objects.some((object) => !hasExplicitShapeConfig(object));
+  return objects.some((object) => {
+    // Text is not auto-seeded — only clean leaked style.fill from older builds.
+    if (
+      ["text", "rich_text", "ticker", "clock", "date"].includes(
+        object.object_type,
+      )
+    ) {
+      return Boolean(
+        object.style.fill &&
+          object.style.fill !== "transparent" &&
+          object.style.text_background !== true &&
+          // If Shape is intentionally enabled, leave style alone — Shape owns paint.
+          !(
+            hasExplicitShapeConfig(object) && getShapeConfig(object).enabled
+          ),
+      );
+    }
+    // Pure shapes with Reveal on were invisible at edit rest — normalize.
+    if (
+      isPureShapeObjectType(object.object_type) &&
+      hasExplicitShapeConfig(object) &&
+      getShapeConfig(object).reveal?.enabled
+    ) {
+      return true;
+    }
+    // Only fill missing shape config — never strip existing Shape Composer data.
+    return !hasExplicitShapeConfig(object);
+  });
 }
 
 /**
@@ -253,6 +355,44 @@ export function seedShapeComposerOnAllLayers(
   objects: SceneObject[],
 ): SceneObject[] {
   return objects.map((object) => {
+    // Feature 043 — do not auto-enable Shape on text (avoids forced plates).
+    // Designers can still turn Shape on from the Shape tab.
+    if (
+      ["text", "rich_text", "ticker", "clock", "date"].includes(
+        object.object_type,
+      )
+    ) {
+      // Clear leaked shell fills from older seeds when Shape is off and the
+      // Text Background toggle is not in use.
+      if (
+        object.style.fill &&
+        object.style.fill !== "transparent" &&
+        object.style.text_background !== true &&
+        !(hasExplicitShapeConfig(object) && getShapeConfig(object).enabled)
+      ) {
+        return {
+          ...object,
+          style: { ...object.style, fill: "transparent" },
+        };
+      }
+      return object;
+    }
+
+    // Rect / ellipse / … must stay visible while editing — turn off Reveal
+    // covers that were defaulted on in older builds.
+    if (
+      isPureShapeObjectType(object.object_type) &&
+      hasExplicitShapeConfig(object)
+    ) {
+      const config = getShapeConfig(object);
+      if (config.reveal?.enabled) {
+        return patchShapeConfig(object, {
+          reveal: { ...config.reveal, enabled: false },
+        });
+      }
+      return object;
+    }
+
     if (hasExplicitShapeConfig(object)) {
       const raw = object.metadata?.[SHAPE_METADATA_KEY];
       // Repair / normalize main-video shape config when needed.
@@ -303,6 +443,9 @@ export function setShapeConfig(
   object: SceneObject,
   config: ShapeComposerConfig,
 ): SceneObject {
+  const isTextLike = ["text", "rich_text", "ticker", "clock", "date"].includes(
+    object.object_type,
+  );
   const fill =
     config.fillMode === "gradient"
       ? undefined
@@ -327,7 +470,9 @@ export function setShapeConfig(
     },
     style: {
       ...object.style,
-      ...(fill !== undefined ? { fill } : {}),
+      // Text keeps style.fill for the Text → Background toggle only.
+      // Shape fill is painted by ShapeRenderer, not the text shell.
+      ...(fill !== undefined && !isTextLike ? { fill } : {}),
       corner_radius: corner,
       stroke_width: config.strokeWidth,
       stroke_color: config.strokeColor,

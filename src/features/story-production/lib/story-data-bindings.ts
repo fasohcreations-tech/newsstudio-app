@@ -73,6 +73,12 @@ export function storyDataToBindings(
   if (bindings.bible_verse) bindings.verse = bindings.bible_verse;
   if (bindings.verse_reference) bindings.reference = bindings.verse_reference;
   if (bindings.quote) bindings.author = bindings.quote;
+  // Feature 043 text-binding aliases (Story Summary / AI Output / story).
+  if (bindings.summary) {
+    bindings.story = bindings.summary;
+    bindings.story_summary = bindings.summary;
+    if (!bindings.ai_output) bindings.ai_output = bindings.summary;
+  }
 
   return bindings;
 }
@@ -92,6 +98,28 @@ export function mergeStoryDataBindings(
   for (const [key, value] of Object.entries(fromForm)) {
     if (value !== undefined && value !== "") merged[key] = value;
     if (value === "false") merged[key] = value;
+  }
+
+  // Empty story media fields must clear stale demo/previous bindings.
+  // Otherwise a new background image never replaces demo background_video.
+  const clearable = [
+    "background_video",
+    "background_image",
+    "main_video",
+    "main_image",
+    "secondary_video",
+  ] as const;
+  for (const field of clearable) {
+    const raw = data[field];
+    if (typeof raw === "string" && raw.trim() === "") {
+      delete merged[field];
+      if (field === "main_video") delete merged.video;
+      if (field === "main_image") {
+        // Only drop `image` when it was an alias of main_image.
+        if (!String(data.reporter_photo ?? "").trim()) delete merged.image;
+      }
+      if (field === "background_music") delete merged.music;
+    }
   }
 
   return merged;

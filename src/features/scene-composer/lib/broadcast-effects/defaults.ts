@@ -13,7 +13,10 @@ import type {
 
 export const DEFAULT_LIGHT_SWEEP: LightSweepEffectParams = {
   enabled: true,
+  path: "diagonal",
   angle: 45,
+  start: 0,
+  end: 100,
   width: 18,
   opacity: 0.55,
   speed: 0.55,

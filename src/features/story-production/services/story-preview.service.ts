@@ -1,5 +1,7 @@
 import type { SceneObject } from "@/features/scene-composer/types/scene-composer.types";
 import { resolveVariableTokens } from "@/features/motion-scene-engine/lib/variable-binding";
+import { parseBackgroundSlides } from "@/features/scene-composer/lib/background-slides";
+import { isLibraryMediaRef } from "@/features/story-production/lib/library-media-reference";
 import { resolveBindingMediaUrl } from "@/features/story-production/lib/story-data-bindings";
 
 const TEXT_TYPES = new Set(["text", "rich_text", "ticker", "clock", "date"]);
@@ -14,6 +16,42 @@ function hasResolvableOrPendingBinding(
   });
 }
 
+function mediaBindingValue(
+  bindings: Record<string, string>,
+  key: string,
+): string | null {
+  const value = bindings[key];
+  if (!value || value === "#" || value.startsWith("{{")) return null;
+  return value;
+}
+
+/**
+ * Background layer media. Prefer the slide queue on `background_video`.
+ * Pending library refs wait for resolution (no demo fallthrough).
+ */
+export function resolveBackgroundMediaUrl(
+  bindings: Record<string, string>,
+): string | null {
+  const slides = parseBackgroundSlides(bindings);
+  if (slides.length > 0) return slides[0] ?? null;
+
+  const primary = mediaBindingValue(bindings, "background_video");
+  if (primary) {
+    if (isLibraryMediaRef(primary) || primary.startsWith("clip://")) {
+      return null;
+    }
+    // Multi-slide raw string before resolve — take first segment if resolved.
+    const first = primary.split(",")[0]?.trim();
+    return first || null;
+  }
+  const image = mediaBindingValue(bindings, "background_image");
+  if (image) {
+    if (isLibraryMediaRef(image) || image.startsWith("clip://")) return null;
+    return image;
+  }
+  return null;
+}
+
 export function resolveObjectMediaUrl(
   object: SceneObject,
   bindings: Record<string, string>,
@@ -23,6 +61,17 @@ export function resolveObjectMediaUrl(
     typeof object.metadata?.region_key === "string"
       ? object.metadata.region_key
       : "";
+
+  if (
+    object.metadata?.layer === "background" ||
+    object.metadata?.component_kind === "background" ||
+    object.metadata?.generator === "background" ||
+    name === "background" ||
+    (typeof object.metadata?.component_slug === "string" &&
+      object.metadata.component_slug.includes("background"))
+  ) {
+    return resolveBackgroundMediaUrl(bindings);
+  }
 
   if (object.object_type === "logo" || region === "reporter-logo") {
     const reporterKeys = ["reporter_photo", "reporter_image"];
@@ -96,8 +145,12 @@ export function resolveObjectDisplayText(
     return bindings.date ?? "28 ജൂലൈ 2026";
   }
 
-  const text = object.content.text;
-  if (typeof text !== "string") return object.name;
+  const fromContent =
+    typeof object.content.text === "string" ? object.content.text : "";
+  const fromBinding =
+    typeof object.bindings.text === "string" ? object.bindings.text : "";
+  const text = fromContent || fromBinding;
+  if (!text) return object.name;
 
   return resolveVariableTokens(text, bindings);
 }

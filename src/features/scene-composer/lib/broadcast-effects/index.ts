@@ -47,3 +47,13 @@ export {
   needsGnn001LightSweepDemoPatch,
   patchGnn001LightSweepDemos,
 } from "@/features/scene-composer/lib/broadcast-effects/light-sweep-demo";
+
+export {
+  LIGHT_SWEEP_PATH_ANGLES,
+  LIGHT_SWEEP_PATH_OPTIONS,
+  normalizeLightSweepParams,
+  resolveLightSweepAngle,
+  lightSweepCssPosition,
+  lightSweepCanvasCenter,
+  angleForLightSweepPath,
+} from "@/features/scene-composer/lib/broadcast-effects/resolve-light-sweep";

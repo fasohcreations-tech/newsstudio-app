@@ -191,10 +191,15 @@ export function ShapeRenderer({
   const anchorPoint = resolveAnchorPoint(config);
   const width = Math.max(1, layerWidth * placement.width);
   const height = Math.max(1, layerHeight * placement.height);
-  // Rest at end of reveal when idle so content stays visible while editing.
+  // Overlay + reveal: rest at END so host content shows while editing.
+  // Replace (rect/ellipse/…): rest in HOLD so the shape stays visible and
+  // fill/stroke/kind edits are visible without pressing Preview.
   const restMs =
     reveal.enabled && !previewActive && !isPlaying && !useExternalClock
-      ? Math.max(revealTotal, 1)
+      ? overlay
+        ? Math.max(revealTotal, 1)
+        : Math.max(reveal.entranceDurationMs, 1) +
+          Math.max(0, Math.floor(reveal.holdMs / 2))
       : rafMs;
   const timeMs = useExternalClock || isPlaying ? clockMs : restMs;
   const revealSample = sampleShapeReveal(config, timeMs, {

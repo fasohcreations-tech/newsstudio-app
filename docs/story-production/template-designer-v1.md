@@ -3,7 +3,7 @@
 **Branch:** `feature/template-designer-v1`  
 **Module:** `src/features/template-designer/`  
 **Routes:** `/templates/*`  
-**Status:** Initialized (scaffold). Persistence + deep Scene Composer hosting come next.
+**Status:** Single-page Design Workspace live. Templates are persisted scenes.
 
 ---
 
@@ -39,95 +39,123 @@ Renderer  →  paints from Template + Story data (Canvas V2 / DOM Legacy)
 
 ---
 
-## 3. Routes (shipped)
+## 3. Architecture decision — a Template *is* a template scene
 
-| Route | Purpose |
-|-------|---------|
-| `/templates` | Library list |
-| `/templates/new` | Create template |
-| `/templates/:id` | Redirect → design |
-| `/templates/:id/design` | Main Designer |
-| `/templates/:id/assets` | Template assets |
-| `/templates/:id/layers` | Layer Manager |
-| `/templates/:id/properties` | Property Inspector |
-| `/templates/:id/animations` | Animation Editor |
-| `/templates/:id/behaviours` | Behaviour Editor |
-| `/templates/:id/shapes` | Shape Composer |
-| `/templates/:id/effects` | Effects Studio |
-| `/templates/:id/bindings` | Data Bindings |
-| `/templates/:id/preview` | Live Preview |
+The first pass kept `BroadcastTemplate` records in an in-memory store and gave
+each feature its own placeholder route. That produced ten pages with no editing
+capability, and templates vanished on server restart.
 
-Story routes are **unchanged**.
+Feature 040 is now backed by the existing persistence:
+
+- `creative_studio_motion_scenes` rows with **`is_template = true`** *are* the
+  templates. `motionService.listScenes()` already filters on that flag, so the
+  Template Library and the Scene Library can never drift apart.
+- `templateId` in the route **is** the composer scene id.
+- No migration, no second source of truth, and templates survive restarts.
+
+Links from the earlier in-memory build carry ids that were never scenes. The
+Design route detects that and explains it instead of returning a bare 404.
 
 ---
 
-## 4. Module map
+## 4. Single Design Workspace
 
-```
-src/features/template-designer/
-  types/template-designer.types.ts
-  constants/template-designer.constants.ts
-  services/
-    template-designer.service.ts
-    template-designer.service.impl.ts   # in-memory seed (dev scaffold)
-  actions/template-designer.actions.ts
-  components/
-    template-library-home.tsx
-    create-template-form.tsx
-    template-designer-shell.tsx
-    template-panel-placeholder.tsx
-  lib/
-    load-template.ts
-    render-template-panel.tsx
-```
+`/templates/:templateId/design` mounts **`SceneComposerWorkspace`** — the same
+runtime Story Preview uses. One screen, four regions:
 
-App nav: **Templates** → `/templates` (`src/shared/config/navigation.ts`).
+| Region | Component | Capabilities |
+|--------|-----------|--------------|
+| **Left** | `ComposerLayersPanel` | Hierarchical tree (groups nest via `parent_object_id`), drag & drop reorder, group / ungroup, lock, hide, rename, duplicate, delete |
+| **Center** | `EditorCanvas` | Zoom, pan, rulers, grid, guides, safe area, snap, object + multi-selection, bounding box, 8 resize handles, rotation handle |
+| **Right** | `PropertyInspectorPanel` | Object · Text · Transform · Animation · Effects · Behaviours · Shapes · Bindings · Story |
+| **Bottom** | `EnhancedTimelinePanel` | Playhead, markers, playback controls, frame stepping, loop, fps |
 
----
+The Property Inspector switches contents on the selected object's kind
+(`classifyObject`), so a logo, ticker, clock and shape each expose their own
+fields.
 
-## 5. Integration contract
+### Engines are embedded, not forked
 
-Each Designer panel **hosts** an existing engine — it does not fork it:
-
-| Panel | Existing module |
-|-------|-----------------|
-| Design / Layers / Properties | Scene Composer |
-| Shapes | Shape Composer |
-| Behaviours | Behaviour Engine |
-| Animations | Motion Library |
-| Effects | Broadcast Effects |
-| Preview | StoryLivePreview |
-| Assets | Asset Engine |
-| Bindings | Story variable binding |
-
-`BroadcastTemplate.composer_scene_id` links to an existing Composer Scene when available.
+| Inspector tab | Existing module |
+|---------------|-----------------|
+| Animation | Motion Library (`LayerMotionFields`) |
+| Effects | Broadcast Effects (`LayerEffectsPanel`) |
+| Behaviours | Behaviour Engine (`LayerBehaviorsPanel`) |
+| Shapes | Shape Composer (`LayerShapePanel`) |
+| Bindings | Story variable binding (`LayerBindingsPanel`) |
+| Story | Story data form (`StoryDataFormPanel`) |
+| Canvas preview | `StoryLivePreview` |
 
 ---
 
-## 6. Initialization status
+## 5. Routes
+
+| Route | Behaviour |
+|-------|-----------|
+| `/templates` | Library — lists persisted template scenes |
+| `/templates/new` | Creates a real template scene, then opens the workspace |
+| `/templates/:id` | Redirect → `design` |
+| `/templates/:id/design` | **The workspace** (single page) |
+| `/templates/:id/layers` · `/preview` | Redirect → `design` |
+| `/templates/:id/properties` | Redirect → `design?inspector=object` |
+| `/templates/:id/animations` | Redirect → `design?inspector=animation` |
+| `/templates/:id/effects` | Redirect → `design?inspector=effects` |
+| `/templates/:id/behaviours` | Redirect → `design?inspector=behaviors` |
+| `/templates/:id/shapes` | Redirect → `design?inspector=shape` |
+| `/templates/:id/bindings` | Redirect → `design?inspector=bindings` |
+| `/templates/:id/assets` | Redirect → `design?inspector=story` |
+
+The per-feature routes are kept as redirects so existing links stay valid and
+land on the matching inspector tab. Story routes are **unchanged**.
+
+---
+
+## 6. Bindings
+
+`LayerBindingsPanel` writes the tokens the runtime already resolves:
+
+| Field | Written value | Consumed by |
+|-------|---------------|-------------|
+| `bindings.text` | `{{headline}}` | `StoryLivePreview`, Canvas text renderer |
+| `bindings.src` | `{{image}}` | `StoryLivePreview`, `scene-to-runtime` |
+| `bindings.story_field` | `image` | `resolveMediaTargetForObject` (media browser target) |
+
+---
+
+## 7. Status
 
 | Deliverable | Status |
 |-------------|--------|
-| Route hierarchy | ✅ |
-| Template types + binding keys | ✅ |
-| Library / create / designer shell | ✅ |
-| Seed packages (GNN-001, GNN-002, Reels) | ✅ in-memory |
-| Nav entry | ✅ |
+| Single Design Workspace | ✅ |
+| Layer tree + drag & drop + groups | ✅ |
+| Canvas zoom/pan/grid/rulers/safe area/snap | ✅ (pre-existing) |
+| Multi-selection bounding box | ✅ |
+| Rotation handle (Shift = 15° steps) | ✅ |
+| Inspector: Object/Text/Transform/Animation/Effects/Behaviours/Shapes/Bindings | ✅ |
+| Animation timeline (bottom) | ✅ (pre-existing) |
+| Persisted templates (no in-memory store) | ✅ |
+| Deep links from legacy panel routes | ✅ |
 | Story routes unchanged | ✅ |
-| Supabase persistence migration | 🔲 next |
-| Embed SceneComposerWorkspace in Design | 🔲 next |
-| Story.template_id reference | 🔲 next (non-breaking) |
+| Keyframe editing in bottom timeline | 🔲 next |
+| Nested group transform inheritance on canvas | 🔲 next |
+| `Story.template_id` reference | 🔲 next (additive, non-breaking) |
 | Template Compiler for Render Engine V2 | 🔲 later |
 
----
+### Known limits
 
-## 7. Next engineering steps
+- Resize math uses unrotated axes, so dragging a side handle on a rotated layer
+  moves along screen axes rather than the layer's local axes.
+- Grouping creates a transform parent; the canvas does not yet cascade a group's
+  transform onto its children.
+- The bottom timeline exposes playback and markers; per-property keyframe curves
+  are still edited in the Animation tab.
 
-1. **Migration** `broadcast_templates` table (JSON document + `composer_scene_id` FK).  
-2. **Design panel** mounts `SceneComposerWorkspace` when a scene is linked; “Create scene from template” otherwise.  
-3. **Layer / Properties** panels become thin shells over Composer selection state.  
-4. **Story integration:** additive `template_id` on story/package — Stories still work without it.  
-5. Keep Template JSON stable for future Template Compiler + Render Engine V2.
+### Orphaned scaffolding
+
+`template-designer-shell.tsx`, `template-panel-placeholder.tsx`,
+`render-template-panel.tsx`, `template-designer.actions.ts` and the in-memory
+`template-designer.service.impl.ts` are no longer referenced by any route. They
+are retained (not deleted) and can be removed once the branch is reviewed.
 
 ---
 

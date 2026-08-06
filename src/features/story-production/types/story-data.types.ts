@@ -51,6 +51,18 @@ export type StoryDataMedia = {
   gallery_images: string;
   background_video: string;
   background_image: string;
+  /** Background media container — cut | fade | slide. */
+  background_transition_style: string;
+  /** Background slide interval in milliseconds. */
+  background_slide_interval_ms: string;
+  /** Background transition duration in milliseconds. */
+  background_transition_ms: string;
+  /** Background current slide index (manual control). */
+  background_slide_index: string;
+  /** Background media fit: cover | contain | fill. */
+  background_fit: string;
+  /** Background slideshow autoplay: true | false. */
+  background_autoplay: string;
   logo: string;
   watermark: string;
   voice_over: string;

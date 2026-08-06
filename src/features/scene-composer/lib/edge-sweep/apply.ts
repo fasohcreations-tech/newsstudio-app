@@ -47,7 +47,31 @@ export function patchEdgeSweepConfig(
   patch: Partial<EdgeSweepConfig>,
 ): SceneObject {
   const current = getEdgeSweepConfig(object);
-  return setEdgeSweepConfig(object, { ...current, ...patch, version: 1 });
+  const nextMargins =
+    patch.margins === undefined
+      ? current.margins
+      : patch.margins === null
+        ? null
+        : {
+            top: 0,
+            right: 0,
+            bottom: 0,
+            left: 0,
+            ...(current.margins ?? {
+              top: current.margin,
+              right: current.margin,
+              bottom: current.margin,
+              left: current.margin,
+            }),
+            ...patch.margins,
+          };
+
+  return setEdgeSweepConfig(object, {
+    ...current,
+    ...patch,
+    version: 1,
+    margins: nextMargins,
+  });
 }
 
 export function applyEdgeSweepPreset(
@@ -166,6 +190,49 @@ export function resolveCornerRadius(
     return Math.max(0, config.cornerRadius);
   }
   return Math.max(0, Number(object.style.corner_radius ?? 0));
+}
+
+/** Resolved per-side path insets (authored margin only, not stroke pad). */
+export function resolveEdgeSweepSideMargins(
+  config: Pick<EdgeSweepConfig, "margin" | "margins">,
+): { top: number; right: number; bottom: number; left: number } {
+  if (config.margins) {
+    return {
+      top: Number(config.margins.top) || 0,
+      right: Number(config.margins.right) || 0,
+      bottom: Number(config.margins.bottom) || 0,
+      left: Number(config.margins.left) || 0,
+    };
+  }
+  const m = Number(config.margin) || 0;
+  return { top: m, right: m, bottom: m, left: m };
+}
+
+/**
+ * SVG/canvas path box for the edge sweep ring.
+ * Stroke pad keeps a thick stroke from clipping when margin is 0;
+ * authored margins then pull the run further in (or out if negative).
+ */
+export function resolveEdgeSweepPathBox(
+  width: number,
+  height: number,
+  cornerRadius: number,
+  config: Pick<EdgeSweepConfig, "width" | "margin" | "margins">,
+): { x: number; y: number; width: number; height: number; rx: number } {
+  const sides = resolveEdgeSweepSideMargins(config);
+  const strokePad = Math.max(config.width * 0.5 + 0.5, 1.5);
+  const top = strokePad + sides.top;
+  const right = strokePad + sides.right;
+  const bottom = strokePad + sides.bottom;
+  const left = strokePad + sides.left;
+  const pathW = Math.max(1, width - left - right);
+  const pathH = Math.max(1, height - top - bottom);
+  const shrink = Math.min(top, right, bottom, left) * 0.35;
+  const rx = Math.max(
+    0,
+    Math.min(cornerRadius, Math.min(pathW, pathH) / 2) - Math.max(0, shrink),
+  );
+  return { x: left, y: top, width: pathW, height: pathH, rx };
 }
 
 /** Approximate perimeter of a rounded rectangle. */

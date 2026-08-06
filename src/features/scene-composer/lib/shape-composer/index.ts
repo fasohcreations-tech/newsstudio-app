@@ -18,6 +18,7 @@ export {
   hasExplicitShapeConfig,
   isShapeComposerActive,
   isMainVideoContainerObject,
+  isPureShapeObjectType,
   normalizeMainVideoFrameShape,
   enableShapeComposer,
   disableShapeComposer,
@@ -41,6 +42,14 @@ export {
   pathFromPoints,
   gradientCss,
 } from "@/features/scene-composer/lib/shape-composer/geometry";
+
+export {
+  isRectLikeShapeKind,
+  resolveShapeOutline,
+  resolveObjectShapeOutline,
+  sampleShapePerimeter,
+  type ShapeOutlineResolved,
+} from "@/features/scene-composer/lib/shape-composer/outline";
 
 export {
   movePathPoint,

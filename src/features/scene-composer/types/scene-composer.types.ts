@@ -94,6 +94,28 @@ export type TextObjectStyle = {
   input_mode?: "unicode" | "manglish" | "voice";
   auto_resize?: boolean;
   wrap?: boolean;
+  /** Feature 043 — independent Text Layer typography. */
+  italic?: boolean;
+  underline?: boolean;
+  font_style?: "normal" | "italic";
+  auto_width?: boolean;
+  auto_height?: boolean;
+  auto_wrap?: boolean;
+  padding?: { top: number; right: number; bottom: number; left: number } | number;
+  text_stroke?: { color: string; width: number } | null;
+  text_shadow?: {
+    color: string;
+    blur: number;
+    offsetX: number;
+    offsetY: number;
+  } | null;
+  text_glow?: { color: string; blur: number; strength: number } | null;
+  text_gradient?: {
+    type: "linear" | "radial";
+    angle?: number;
+    stops: Array<{ offset: number; color: string }>;
+  } | null;
+  fill?: string;
 };
 
 export type SceneObject = {

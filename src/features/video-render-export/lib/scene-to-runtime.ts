@@ -22,8 +22,10 @@ import {
   patchGnn001LowerPanelObjects,
 } from "@/features/scene-composer/lib/gnn-001-lower-panel.styles";
 import { getShapeConfig } from "@/features/scene-composer/lib/shape-composer";
+import { resolveTextLayerStyle } from "@/features/scene-composer/lib/text-layer";
 import {
   resolveStoryMalayalamFont,
+  STORY_MALAYALAM_FONT_OPTIONS,
 } from "@/features/story-production/constants/story-font-options";
 import {
   isTextLikeObject,
@@ -219,25 +221,56 @@ function kindOf(obj: SceneObject, region: string | null): RuntimeLayerKind {
   return "unknown";
 }
 
-/** Region-aware text styling mirroring StoryLivePreview.PreviewObject. */
+function resolveLayerFontFamily(
+  obj: SceneObject,
+  storyFontFamily: string,
+): string {
+  const raw = asString(obj.style?.font_family);
+  if (!raw) return storyFontFamily;
+  const byValue = STORY_MALAYALAM_FONT_OPTIONS.find((o) => o.value === raw);
+  if (byValue) return malayalamFamilyStack(byValue.family);
+  const byFamily = STORY_MALAYALAM_FONT_OPTIONS.find((o) => o.family === raw);
+  if (byFamily) return malayalamFamilyStack(byFamily.family);
+  return malayalamFamilyStack(raw);
+}
+
+/** Region-aware text styling mirroring Feature 043 Text Layer / StoryLivePreview. */
 function textStyleFor(
   obj: SceneObject,
   region: string | null,
   storyFontFamily: string,
   storyFontWeight: number,
   primaryColor: string,
+  bindings: Record<string, string>,
 ): {
+  fontFamily: string;
   fontSize: number;
   fontWeight: number;
+  fontStyle: "normal" | "italic";
+  underline: boolean;
   color: string;
   backgroundFill: string | null;
   textAlign: CanvasTextAlign;
   verticalAlign: "top" | "middle" | "bottom";
   lineHeight: number;
   letterSpacing: number;
+  padding: { top: number; right: number; bottom: number; left: number };
+  textStroke: { color: string; width: number } | null;
+  textShadow: {
+    color: string;
+    blur: number;
+    offsetX: number;
+    offsetY: number;
+  } | null;
+  textGlow: { color: string; blur: number; strength: number } | null;
+  textGradient: {
+    type: "linear" | "radial";
+    angle: number;
+    stops: Array<{ offset: number; color: string }>;
+  } | null;
   singleLine: boolean;
+  wrap: boolean;
 } {
-  const style = obj.style ?? {};
   const isHeadline = region === "headline" || /headline/i.test(obj.name);
   const isSubheadline =
     region === "subheadline" || /subheadline/i.test(obj.name);
@@ -251,37 +284,50 @@ function textStyleFor(
       ? 600
       : storyFontWeight;
 
-  const color = isLowerPanelText
-    ? GNN_001_LOWER_PANEL_TEXT_COLOR
-    : isTicker
-      ? "#ffffff"
-      : asString(style.color) || "#ffffff";
+  const resolved = resolveTextLayerStyle(obj, bindings, {
+    fontSize: defaultSize,
+    fontWeight: defaultWeight,
+    color: isLowerPanelText
+      ? GNN_001_LOWER_PANEL_TEXT_COLOR
+      : isTicker
+        ? "#ffffff"
+        : undefined,
+  });
 
   // Only the ticker gets a solid bar behind text. Headline/subheadline sit on
   // the separate white lower-info-panel object, so their own fill is
   // transparent when text is present (mirrors StoryLivePreview).
-  const backgroundFill = isTicker ? primaryColor : null;
-
-  const vAlign =
-    style.vertical_alignment === "top"
-      ? "top"
-      : style.vertical_alignment === "bottom"
-        ? "bottom"
-        : "middle";
+  const backgroundFill = isTicker
+    ? primaryColor
+    : resolved.fill !== "transparent"
+      ? resolved.fill
+      : null;
 
   return {
-    fontSize: asNumber(style.font_size ?? style.fontSize, defaultSize),
-    fontWeight: asNumber(style.font_weight ?? style.fontWeight, defaultWeight),
-    color,
+    fontFamily: resolveLayerFontFamily(obj, storyFontFamily),
+    fontSize: resolved.font_size,
+    fontWeight: resolved.font_weight,
+    fontStyle: resolved.italic ? "italic" : "normal",
+    underline: resolved.underline,
+    color: resolved.color,
     backgroundFill,
-    textAlign:
-      (asString(style.alignment) as CanvasTextAlign | null) ||
-      (asString(style.textAlign) as CanvasTextAlign | null) ||
-      "left",
-    verticalAlign: vAlign,
-    lineHeight: asNumber(style.line_height ?? style.lineHeight, 1.35),
-    letterSpacing: asNumber(style.letter_spacing ?? style.letterSpacing, 0),
-    singleLine: isTicker,
+    textAlign: resolved.alignment as CanvasTextAlign,
+    verticalAlign: resolved.vertical_alignment,
+    lineHeight: resolved.line_height,
+    letterSpacing: resolved.letter_spacing,
+    padding: resolved.padding,
+    textStroke: resolved.stroke,
+    textShadow: resolved.shadow,
+    textGlow: resolved.glow,
+    textGradient: resolved.gradient
+      ? {
+          type: resolved.gradient.type,
+          angle: resolved.gradient.angle,
+          stops: resolved.gradient.stops,
+        }
+      : null,
+    singleLine: isTicker || !resolved.auto_wrap,
+    wrap: resolved.auto_wrap && !isTicker,
   };
 }
 
@@ -510,7 +556,14 @@ export function composerSceneToRuntime(
     }
 
     const ts = isTextual
-      ? textStyleFor(obj, region, storyFontFamily, storyFont.weight, primaryColor)
+      ? textStyleFor(
+          obj,
+          region,
+          storyFontFamily,
+          storyFont.weight,
+          primaryColor,
+          bindings,
+        )
       : null;
 
     // Lower-info panel chrome is a solid bar behind headline/subheadline — it
@@ -552,16 +605,49 @@ export function composerSceneToRuntime(
         opacity: asNumber(tr?.opacity, 1),
       },
       text,
-      fontFamily: storyFontFamily,
+      fontFamily: ts?.fontFamily ?? storyFontFamily,
       fontSize: ts ? ts.fontSize * scaleY : null,
       fontWeight: ts ? ts.fontWeight : null,
+      fontStyle: ts?.fontStyle ?? "normal",
+      underline: ts?.underline ?? false,
       color: ts ? ts.color : null,
       textAlign: ts ? ts.textAlign : "left",
       verticalAlign: ts?.verticalAlign ?? "middle",
       lineHeight: ts?.lineHeight ?? 1.35,
       letterSpacing: ts ? ts.letterSpacing * scaleY : 0,
+      padding: ts
+        ? {
+            top: ts.padding.top * scaleY,
+            right: ts.padding.right * scaleX,
+            bottom: ts.padding.bottom * scaleY,
+            left: ts.padding.left * scaleX,
+          }
+        : undefined,
+      textStroke: ts?.textStroke
+        ? {
+            color: ts.textStroke.color,
+            width: ts.textStroke.width * scaleY,
+          }
+        : null,
+      textShadow: ts?.textShadow
+        ? {
+            color: ts.textShadow.color,
+            blur: ts.textShadow.blur * scaleY,
+            offsetX: ts.textShadow.offsetX * scaleX,
+            offsetY: ts.textShadow.offsetY * scaleY,
+          }
+        : null,
+      textGlow: ts?.textGlow
+        ? {
+            color: ts.textGlow.color,
+            blur: ts.textGlow.blur * scaleY,
+            strength: ts.textGlow.strength,
+          }
+        : null,
+      textGradient: ts?.textGradient ?? null,
       backgroundFill: ts?.backgroundFill ?? lowerPanelFill,
       singleLine: ts?.singleLine ?? false,
+      wrap: ts?.wrap ?? true,
       mediaUrl: playlist.length > 0 ? playlist[0]! : media.url,
       mediaKind: playlist.length > 0 ? "image" : media.kind,
       mediaPlaylist: playlist.length > 0 ? playlist : null,

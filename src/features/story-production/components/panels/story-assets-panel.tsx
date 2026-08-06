@@ -31,6 +31,7 @@ import { importUrlToMediaLibrary } from "@/features/story-production/lib/import-
 import {
   MEDIA_TARGET_OPTIONS,
   defaultTargetForAssetCategory,
+  resolveApplyFieldForTarget,
   type StoryMediaTarget,
 } from "@/features/story-production/lib/resolve-media-target";
 import type {
@@ -125,7 +126,8 @@ export function StoryAssetsPanel({
         return;
       }
 
-      onApplyMedia(target.field, mergeForTarget(ref));
+      const field = resolveApplyFieldForTarget(target, asset.mimeType, asset.url);
+      onApplyMedia(field, mergeForTarget(ref));
       toast.success(`Assigned to ${target.label}`);
     } finally {
       setImportingId(null);
@@ -242,7 +244,8 @@ export function StoryAssetsPanel({
         target={target}
         organizationId={organizationId}
         onPick={(url) => {
-          onApplyMedia(target.field, mergeForTarget(url));
+          const field = resolveApplyFieldForTarget(target, undefined, url);
+          onApplyMedia(field, mergeForTarget(url));
         }}
         appendOnPick={appendOnPick}
       />

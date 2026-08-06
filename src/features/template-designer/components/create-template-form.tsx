@@ -17,24 +17,35 @@ import {
 } from "@/components/ui/select";
 import { Textarea } from "@/components/ui/textarea";
 import { cn } from "@/lib/utils";
-import { createTemplateAction } from "@/features/template-designer/actions/template-designer.actions";
 import {
-  ASPECT_PRESETS,
-  TEMPLATE_CATEGORIES,
-} from "@/features/template-designer/constants/template-designer.constants";
+  createMotionSceneAction,
+  updateMotionSceneAction,
+} from "@/features/motion-scene-engine/actions/motion-scene.actions";
+import { MOTION_SCENE_TYPES } from "@/features/motion-scene-engine/constants/motion-scene.constants";
 import type {
-  TemplateAspectPreset,
-  TemplateCategory,
-} from "@/features/template-designer/types/template-designer.types";
+  MotionSceneType,
+  SceneAspectFormat,
+} from "@/features/motion-scene-engine/types/motion-scene.types";
+
+const ASPECTS: Array<{ id: SceneAspectFormat; label: string }> = [
+  { id: "16:9", label: "16:9 — Broadcast HD" },
+  { id: "9:16", label: "9:16 — Vertical / Reels" },
+  { id: "1:1", label: "1:1 — Square" },
+  { id: "4:5", label: "4:5 — Portrait" },
+  { id: "21:9", label: "21:9 — Cinematic" },
+];
+
+function typeLabel(id: string) {
+  return id.replace(/_/g, " ").replace(/\b\w/g, (c) => c.toUpperCase());
+}
 
 export function CreateTemplateForm() {
   const router = useRouter();
   const [pending, startTransition] = useTransition();
   const [name, setName] = useState("");
-  const [code, setCode] = useState("");
   const [description, setDescription] = useState("");
-  const [category, setCategory] = useState<TemplateCategory>("custom");
-  const [aspect, setAspect] = useState<TemplateAspectPreset>("1920x1080");
+  const [sceneType, setSceneType] = useState<MotionSceneType>("lower_third");
+  const [aspect, setAspect] = useState<SceneAspectFormat>("16:9");
 
   const submit = (e: React.FormEvent) => {
     e.preventDefault();
@@ -43,19 +54,29 @@ export function CreateTemplateForm() {
       return;
     }
     startTransition(async () => {
-      const result = await createTemplateAction({
-        name,
-        code: code || undefined,
-        description,
-        category,
-        aspectPreset: aspect,
+      const created = await createMotionSceneAction({
+        name: name.trim(),
+        sceneType,
       });
-      if (!result.success) {
-        toast.error(result.error);
+      if (!created.success) {
+        toast.error(created.error);
         return;
       }
+
+      // Description / aspect are not part of the create contract — patch them
+      // straight after so the new template opens with the chosen canvas.
+      if (description.trim() || aspect !== "16:9") {
+        await updateMotionSceneAction({
+          sceneId: created.data.id,
+          patch: {
+            ...(description.trim() ? { description: description.trim() } : {}),
+            ...(aspect !== "16:9" ? { aspect_format: aspect } : {}),
+          },
+        });
+      }
+
       toast.success("Template created");
-      router.push(`/templates/${result.data.id}/design`);
+      router.push(`/templates/${created.data.id}/design`);
     });
   };
 
@@ -64,8 +85,8 @@ export function CreateTemplateForm() {
       <div>
         <h1 className="text-2xl font-semibold tracking-tight">New Template</h1>
         <p className="mt-1 text-sm text-muted-foreground">
-          Layout and behaviour only — Story data is bound later. Existing Scene
-          Composer / Shape / Behaviour engines are reused.
+          Layout and behaviour only — story data is bound later. The template
+          opens in the single Design workspace.
         </p>
       </div>
 
@@ -81,17 +102,6 @@ export function CreateTemplateForm() {
       </div>
 
       <div className="space-y-2">
-        <Label htmlFor="code">Code</Label>
-        <Input
-          id="code"
-          value={code}
-          onChange={(e) => setCode(e.target.value)}
-          placeholder="e.g. ELECTION-001"
-          className="font-mono"
-        />
-      </div>
-
-      <div className="space-y-2">
         <Label htmlFor="description">Description</Label>
         <Textarea
           id="description"
@@ -103,18 +113,18 @@ export function CreateTemplateForm() {
 
       <div className="grid gap-4 sm:grid-cols-2">
         <div className="space-y-2">
-          <Label>Category</Label>
+          <Label>Template kind</Label>
           <Select
-            value={category}
-            onValueChange={(v: string) => setCategory(v as TemplateCategory)}
+            value={sceneType}
+            onValueChange={(v: string) => setSceneType(v as MotionSceneType)}
           >
             <SelectTrigger>
               <SelectValue />
             </SelectTrigger>
             <SelectContent>
-              {TEMPLATE_CATEGORIES.map((c) => (
-                <SelectItem key={c.id} value={c.id}>
-                  {c.label}
+              {MOTION_SCENE_TYPES.map((id) => (
+                <SelectItem key={id} value={id}>
+                  {typeLabel(id)}
                 </SelectItem>
               ))}
             </SelectContent>
@@ -124,19 +134,15 @@ export function CreateTemplateForm() {
           <Label>Canvas</Label>
           <Select
             value={aspect}
-            onValueChange={(v: string) => setAspect(v as TemplateAspectPreset)}
+            onValueChange={(v: string) => setAspect(v as SceneAspectFormat)}
           >
             <SelectTrigger>
               <SelectValue />
             </SelectTrigger>
             <SelectContent>
-              {(
-                Object.entries(ASPECT_PRESETS) as Array<
-                  [TemplateAspectPreset, { label: string }]
-                >
-              ).map(([id, preset]) => (
-                <SelectItem key={id} value={id}>
-                  {preset.label} ({id})
+              {ASPECTS.map((item) => (
+                <SelectItem key={item.id} value={item.id}>
+                  {item.label}
                 </SelectItem>
               ))}
             </SelectContent>

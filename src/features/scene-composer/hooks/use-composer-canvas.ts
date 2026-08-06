@@ -88,20 +88,31 @@ export function useComposerCanvas() {
         : [...prev.selectedObjectIds, id];
       return {
         selectedObjectIds,
-        primaryObjectId: selectedObjectIds[0] ?? null,
+        primaryObjectId:
+          selectedObjectIds.includes(id) && !exists
+            ? id
+            : (selectedObjectIds[0] ?? null),
       };
+    });
+  }, []);
+
+  /** Replace the full selection set (marquee, select-all, paste). */
+  const selectObjects = useCallback((ids: string[]) => {
+    setSelection({
+      selectedObjectIds: ids,
+      primaryObjectId: ids[0] ?? null,
     });
   }, []);
 
   const zoomBy = useCallback((delta: number) => {
     setViewport((prev) => ({
       ...prev,
-      zoom: Math.max(0.25, Math.min(2, prev.zoom + delta)),
+      zoom: Math.max(0.1, Math.min(3, prev.zoom + delta)),
     }));
   }, []);
 
   const setZoom = useCallback((zoom: number) => {
-    const nextZoom = Math.max(0.25, Math.min(2, zoom));
+    const nextZoom = Math.max(0.1, Math.min(3, zoom));
     setViewport((prev) =>
       Math.abs(prev.zoom - nextZoom) < 0.001
         ? prev
@@ -170,6 +181,7 @@ export function useComposerCanvas() {
     spaceHeld,
     setIsPanning,
     selectObject,
+    selectObjects,
     zoomBy,
     panBy,
     setViewport,

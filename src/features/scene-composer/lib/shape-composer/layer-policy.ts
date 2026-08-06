@@ -1,6 +1,12 @@
 import { isShapeComposerActive } from "@/features/scene-composer/lib/shape-composer/apply";
 import type { SceneObject } from "@/features/scene-composer/types/scene-composer.types";
 
+function isTextLikeLayer(object: SceneObject): boolean {
+  return ["text", "rich_text", "ticker", "clock", "date"].includes(
+    object.object_type,
+  );
+}
+
 /**
  * Layers that keep their native content when Shape Composer is enabled.
  * Shape draws as a frame/overlay instead of replacing the layer.
@@ -39,10 +45,16 @@ export function isShapeOverlayLayer(object: SceneObject): boolean {
 
 /** Replace the whole layer with ShapeRenderer (pure shape objects). */
 export function shouldReplaceContentWithShape(object: SceneObject): boolean {
+  // Text stays glyph content; shape only overlays (never replaces).
+  if (isTextLikeLayer(object)) return false;
   return isShapeComposerActive(object) && !isShapeOverlayLayer(object);
 }
 
-/** Draw ShapeRenderer on top of existing layer content. */
+/**
+ * Draw ShapeRenderer with the layer.
+ * Text: when the designer enables Shape Composer, draw it (fill / stroke /
+ * reveal). Auto-seed still skips text so plates are not forced on.
+ */
 export function shouldOverlayShape(object: SceneObject): boolean {
   return isShapeComposerActive(object) && isShapeOverlayLayer(object);
 }

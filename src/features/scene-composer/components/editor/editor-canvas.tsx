@@ -24,6 +24,10 @@ import {
   SAFE_TITLE_INSET,
 } from "@/features/scene-composer/components/editor/editor.constants";
 import { SelectionChrome } from "@/features/scene-composer/components/editor/selection-chrome";
+import {
+  objectsInMarquee,
+  type AlignmentGuide,
+} from "@/features/scene-composer/lib/alignment-guides";
 import { createCanvasService } from "@/features/scene-composer/services/canvas.service.impl";
 import type {
   ComposerScene,
@@ -35,6 +39,8 @@ import type { StoryPreviewAspect } from "@/features/story-production/types/story
 
 const canvasService = createCanvasService();
 
+type MarqueeRect = { x0: number; y0: number; x1: number; y1: number };
+
 type EditorCanvasProps = {
   scene: ComposerScene;
   resolvedBindings: Record<string, string>;
@@ -44,9 +50,12 @@ type EditorCanvasProps = {
   aspect: StoryPreviewAspect;
   viewport: ComposerViewportState;
   selectedObject: SceneObject | null;
+  /** Every selected layer — drives the multi-selection bounding box. */
+  selectedObjects?: SceneObject[];
   isPanning: boolean;
   spaceHeld: boolean;
   onSelectObject: (id: string | null, additive?: boolean) => void;
+  onSelectObjects?: (ids: string[]) => void;
   onPan: (dx: number, dy: number) => void;
   onSetZoom: (zoom: number) => void;
   onFitZoom: (zoom: number) => void;
@@ -66,6 +75,13 @@ type EditorCanvasProps = {
     transform: SceneObject["transform"],
     origin: SceneObject["transform"],
   ) => void;
+  /** External request to apply a named zoom preset (menu bar). */
+  zoomPresetRequest?: { key: number; mode: "fit" | "absolute"; zoom?: number } | null;
+  /** Feature 043 — canvas text editing. */
+  editingObjectId?: string | null;
+  onBeginTextEdit?: (objectId: string) => void;
+  onCommitTextEdit?: (objectId: string, text: string) => void;
+  onCancelTextEdit?: () => void;
 };
 
 /**
@@ -80,9 +96,11 @@ export function EditorCanvas({
   aspect,
   viewport,
   selectedObject,
+  selectedObjects,
   isPanning,
   spaceHeld,
   onSelectObject,
+  onSelectObjects,
   onPan,
   onSetZoom,
   onFitZoom,
@@ -91,13 +109,91 @@ export function EditorCanvas({
   onBrowseMedia,
   onTransformLive,
   onTransformCommit,
+  zoomPresetRequest,
+  editingObjectId = null,
+  onBeginTextEdit,
+  onCommitTextEdit,
+  onCancelTextEdit,
 }: EditorCanvasProps) {
   const containerRef = useRef<HTMLDivElement>(null);
+  const artboardRef = useRef<HTMLDivElement>(null);
   const [fitReady, setFitReady] = useState(false);
+  const [marquee, setMarquee] = useState<MarqueeRect | null>(null);
+  const [alignmentGuides, setAlignmentGuides] = useState<AlignmentGuide[]>([]);
+  const marqueeRef = useRef<MarqueeRect | null>(null);
   const artboard = useMemo(
     () => canvasService.getArtboardDimensions(scene.composer_settings),
     [scene.composer_settings],
   );
+
+  /** Map a client point into artboard-local coordinates. */
+  const clientToArtboard = useCallback(
+    (clientX: number, clientY: number) => {
+      const el = artboardRef.current;
+      if (!el) return { x: 0, y: 0 };
+      const rect = el.getBoundingClientRect();
+      return {
+        x: (clientX - rect.left) / Math.max(0.01, viewport.zoom),
+        y: (clientY - rect.top) / Math.max(0.01, viewport.zoom),
+      };
+    },
+    [viewport.zoom],
+  );
+
+  const finishMarquee = useCallback(
+    (additive: boolean) => {
+      const rect = marqueeRef.current;
+      marqueeRef.current = null;
+      setMarquee(null);
+      if (!rect || !onSelectObjects) return;
+      const hits = objectsInMarquee(scene.composer_document.objects, {
+        left: rect.x0,
+        top: rect.y0,
+        right: rect.x1,
+        bottom: rect.y1,
+      });
+      const ids = hits.map((object) => object.id);
+      if (ids.length === 0) {
+        if (!additive) onSelectObject(null);
+        return;
+      }
+      if (additive) {
+        const merged = Array.from(
+          new Set([...((selectedObjects ?? []).map((o) => o.id)), ...ids]),
+        );
+        onSelectObjects(merged);
+      } else {
+        onSelectObjects(ids);
+      }
+    },
+    [
+      onSelectObject,
+      onSelectObjects,
+      scene.composer_document.objects,
+      selectedObjects,
+    ],
+  );
+
+  /** Union box for a multi-layer selection (null when 0 or 1 layer). */
+  const multiSelection = useMemo(() => {
+    const members = selectedObjects ?? [];
+    if (members.length < 2) return null;
+    const left = Math.min(...members.map((m) => m.transform.x));
+    const top = Math.min(...members.map((m) => m.transform.y));
+    const right = Math.max(
+      ...members.map((m) => m.transform.x + m.transform.width),
+    );
+    const bottom = Math.max(
+      ...members.map((m) => m.transform.y + m.transform.height),
+    );
+    return {
+      members,
+      left,
+      top,
+      width: Math.max(1, right - left),
+      height: Math.max(1, bottom - top),
+    };
+  }, [selectedObjects]);
 
   const computeFit = useCallback(() => {
     const container = containerRef.current;
@@ -113,6 +209,19 @@ export function EditorCanvas({
   const hasUserZoomed = useRef(false);
   const zoomRef = useRef(viewport.zoom);
   zoomRef.current = viewport.zoom;
+
+  useEffect(() => {
+    if (!zoomPresetRequest) return;
+    if (zoomPresetRequest.mode === "fit") {
+      hasUserZoomed.current = false;
+      onFitZoom(computeFit());
+      return;
+    }
+    if (typeof zoomPresetRequest.zoom === "number") {
+      hasUserZoomed.current = true;
+      onSetZoom(zoomPresetRequest.zoom);
+    }
+  }, [zoomPresetRequest, computeFit, onFitZoom, onSetZoom]);
 
   useEffect(() => {
     const container = containerRef.current;
@@ -208,6 +317,24 @@ export function EditorCanvas({
           <Maximize2 className="mr-1.5 size-4" />
           Fit
         </Button>
+        <Button
+          type="button"
+          size="sm"
+          variant="outline"
+          className={EDITOR_UI.button}
+          onClick={() => applyZoom(1)}
+        >
+          100%
+        </Button>
+        <Button
+          type="button"
+          size="sm"
+          variant="outline"
+          className={EDITOR_UI.button}
+          onClick={() => applyZoom(2)}
+        >
+          200%
+        </Button>
         <span className={`${EDITOR_UI.label} tabular-nums`}>{zoomLabel}</span>
         <div className="ml-auto flex flex-wrap items-center gap-1">
           <ToggleChip
@@ -262,13 +389,23 @@ export function EditorCanvas({
         }}
         onPointerUp={() => onSetPanning(false)}
         onPointerLeave={() => onSetPanning(false)}
-        onDoubleClick={() => applyFit()}
+        onDoubleClick={(event) => {
+          const target = event.target as HTMLElement;
+          if (
+            target.closest("[data-text-layer]") ||
+            target.closest("[data-text-editing]")
+          ) {
+            return;
+          }
+          applyFit();
+        }}
         onWheel={(event) => {
           event.preventDefault();
-          const factor = event.ctrlKey || event.metaKey ? 0.08 : 0.05;
+          // Ctrl/Cmd + wheel = precise zoom (trackpads send ctrl naturally).
+          const factor = event.ctrlKey || event.metaKey ? 0.1 : 0.05;
           const next = Math.max(
-            0.25,
-            Math.min(2, viewport.zoom + (event.deltaY > 0 ? -factor : factor)),
+            0.1,
+            Math.min(3, viewport.zoom + (event.deltaY > 0 ? -factor : factor)),
           );
           applyZoom(next);
         }}
@@ -302,11 +439,58 @@ export function EditorCanvas({
             }}
           >
             <div
+              ref={artboardRef}
               className="relative overflow-hidden shadow-2xl ring-1 ring-white/10"
               style={{
                 width: artboard.width,
                 height: artboard.height,
                 background: "#071225",
+              }}
+              onPointerDown={(event) => {
+                if (event.button !== 0 || spaceHeld || isPanning) return;
+                const target = event.target as HTMLElement;
+                if (target.closest("[data-selection-chrome]")) return;
+                const point = clientToArtboard(event.clientX, event.clientY);
+                const hit = canvasService.hitTestObject(
+                  scene.composer_document.objects,
+                  point,
+                );
+                // Layer hit — let StoryLivePreview handle selection.
+                if (hit) return;
+                event.preventDefault();
+                const next = {
+                  x0: point.x,
+                  y0: point.y,
+                  x1: point.x,
+                  y1: point.y,
+                };
+                marqueeRef.current = next;
+                setMarquee(next);
+                (event.currentTarget as HTMLElement).setPointerCapture(
+                  event.pointerId,
+                );
+              }}
+              onPointerMove={(event) => {
+                if (!marqueeRef.current) return;
+                const point = clientToArtboard(event.clientX, event.clientY);
+                const next = {
+                  ...marqueeRef.current,
+                  x1: point.x,
+                  y1: point.y,
+                };
+                marqueeRef.current = next;
+                setMarquee(next);
+              }}
+              onPointerUp={(event) => {
+                if (!marqueeRef.current) return;
+                try {
+                  (event.currentTarget as HTMLElement).releasePointerCapture(
+                    event.pointerId,
+                  );
+                } catch {
+                  /* already released */
+                }
+                finishMarquee(event.shiftKey || event.metaKey || event.ctrlKey);
               }}
             >
               {viewport.safeAreaVisible ? (
@@ -336,16 +520,85 @@ export function EditorCanvas({
                 isPlaying={isPlaying}
                 aspect={aspect}
                 selectedObjectId={selectedObject?.id ?? null}
-                onSelectObject={(id) => onSelectObject(id)}
+                onSelectObject={(id, additive) => onSelectObject(id, additive)}
                 interactive
                 fillParent
                 className="!bg-transparent"
                 onBrowseMedia={onBrowseMedia}
+                editingObjectId={editingObjectId}
+                onBeginTextEdit={onBeginTextEdit}
+                onCommitTextEdit={onCommitTextEdit}
+                onCancelTextEdit={onCancelTextEdit}
               />
 
-              {selectedObject ? (
+              {marquee ? (
+                <div
+                  className="pointer-events-none absolute z-50 border border-sky-400 bg-sky-400/15"
+                  style={{
+                    left: Math.min(marquee.x0, marquee.x1),
+                    top: Math.min(marquee.y0, marquee.y1),
+                    width: Math.abs(marquee.x1 - marquee.x0),
+                    height: Math.abs(marquee.y1 - marquee.y0),
+                  }}
+                />
+              ) : null}
+
+              {alignmentGuides.map((guide, index) => (
+                <div
+                  key={`${guide.orientation}-${guide.position}-${index}`}
+                  className="pointer-events-none absolute z-[45] bg-fuchsia-400"
+                  style={
+                    guide.orientation === "vertical"
+                      ? {
+                          left: guide.position,
+                          top: Math.min(guide.from, guide.to),
+                          width: 1,
+                          height: Math.abs(guide.to - guide.from),
+                        }
+                      : {
+                          top: guide.position,
+                          left: Math.min(guide.from, guide.to),
+                          height: 1,
+                          width: Math.abs(guide.to - guide.from),
+                        }
+                  }
+                />
+              ))}
+
+              {multiSelection ? (
+                <div className="pointer-events-none absolute inset-0 z-30">
+                  {multiSelection.members.map((member) => (
+                    <div
+                      key={member.id}
+                      className="absolute border border-sky-400/70"
+                      style={{
+                        left: member.transform.x,
+                        top: member.transform.y,
+                        width: member.transform.width,
+                        height: member.transform.height,
+                      }}
+                    />
+                  ))}
+                  <div
+                    className="absolute border-2 border-dashed border-sky-300"
+                    style={{
+                      left: multiSelection.left,
+                      top: multiSelection.top,
+                      width: multiSelection.width,
+                      height: multiSelection.height,
+                    }}
+                  >
+                    <span className="absolute -top-6 left-0 whitespace-nowrap rounded bg-sky-500 px-1.5 py-0.5 text-[12px] font-semibold text-white">
+                      {multiSelection.members.length} layers selected
+                    </span>
+                  </div>
+                </div>
+              ) : null}
+
+              {selectedObject && editingObjectId !== selectedObject.id ? (
                 <SelectionChrome
                   object={selectedObject}
+                  siblings={scene.composer_document.objects}
                   showGuides={viewport.guidesVisible}
                   artboardWidth={artboard.width}
                   artboardHeight={artboard.height}
@@ -353,6 +606,7 @@ export function EditorCanvas({
                   snapEnabled={viewport.snapEnabled}
                   gridSize={scene.composer_settings.grid_size}
                   spaceHeld={spaceHeld || isPanning}
+                  onAlignmentGuides={setAlignmentGuides}
                   onTransformLive={
                     onTransformLive
                       ? (transform) => onTransformLive(selectedObject.id, transform)

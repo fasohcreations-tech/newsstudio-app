@@ -145,7 +145,9 @@ export function createDefaultShapeConfig(
           ? "broadcast_frame"
           : "standard",
     behaviors: [],
-    reveal: createDefaultReveal({ enabled: true }),
+    // Pure shapes stay visible while editing. Reveal covers are opt-in
+    // (main video / media frames enable them explicitly).
+    reveal: createDefaultReveal({ enabled: false }),
     lockedGeometry: false,
     hidden: false,
   };

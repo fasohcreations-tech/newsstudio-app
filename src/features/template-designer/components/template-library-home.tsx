@@ -16,17 +16,19 @@ import {
   CardTitle,
 } from "@/components/ui/card";
 import { cn } from "@/lib/utils";
-import { duplicateTemplateAction } from "@/features/template-designer/actions/template-designer.actions";
-import { TEMPLATE_CATEGORIES } from "@/features/template-designer/constants/template-designer.constants";
-import type { BroadcastTemplateSummary } from "@/features/template-designer/types/template-designer.types";
+import { duplicateMotionSceneAction } from "@/features/motion-scene-engine/actions/motion-scene.actions";
+import type { MotionScene } from "@/features/motion-scene-engine/types/motion-scene.types";
 
 type TemplateLibraryHomeProps = {
   organizationName: string;
-  templates: BroadcastTemplateSummary[];
+  templates: MotionScene[];
 };
 
-function categoryLabel(id: string) {
-  return TEMPLATE_CATEGORIES.find((c) => c.id === id)?.label ?? id;
+function layerCount(template: MotionScene): number | null {
+  const raw = template.metadata?.layer_count;
+  if (typeof raw === "number") return raw;
+  const objects = template.scene_document?.layers?.length ?? 0;
+  return objects > 0 ? objects : null;
 }
 
 export function TemplateLibraryHome({
@@ -35,11 +37,10 @@ export function TemplateLibraryHome({
 }: TemplateLibraryHomeProps) {
   const router = useRouter();
   const [pending, startTransition] = useTransition();
-  const items = templates;
 
   const duplicate = (id: string) => {
     startTransition(async () => {
-      const result = await duplicateTemplateAction(id);
+      const result = await duplicateMotionSceneAction(id);
       if (!result.success) {
         toast.error(result.error);
         return;
@@ -63,9 +64,8 @@ export function TemplateLibraryHome({
           </h1>
           <p className="mt-1 max-w-2xl text-sm text-muted-foreground">
             {organizationName} · Build reusable broadcast graphics packages.
-            Stories supply data; Templates decide layout. Scene Composer, Shape,
-            Behaviour, and Motion stay the design engines — this module is the
-            master shell.
+            Stories supply data; Templates decide layout. Every template opens in
+            one workspace — layers, canvas, inspector and timeline together.
           </p>
         </div>
         <Link href="/templates/new" className={cn(buttonVariants())}>
@@ -74,7 +74,7 @@ export function TemplateLibraryHome({
         </Link>
       </div>
 
-      {items.length === 0 ? (
+      {templates.length === 0 ? (
         <Card>
           <CardHeader>
             <CardTitle className="flex items-center gap-2 text-base">
@@ -93,56 +93,53 @@ export function TemplateLibraryHome({
         </Card>
       ) : (
         <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-3">
-          {items.map((template) => (
-            <Card key={template.id} className="flex flex-col">
-              <CardHeader className="space-y-2">
-                <div className="flex items-start justify-between gap-2">
-                  <div>
-                    <p className="font-mono text-[11px] text-muted-foreground">
-                      {template.code}
-                    </p>
+          {templates.map((template) => {
+            const layers = layerCount(template);
+            return (
+              <Card key={template.id} className="flex flex-col">
+                <CardHeader className="space-y-2">
+                  <div className="flex items-start justify-between gap-2">
                     <CardTitle className="text-base">{template.name}</CardTitle>
+                    <Badge variant="secondary">v{template.version}</Badge>
                   </div>
-                  <Badge variant="secondary">{template.workflow_state}</Badge>
-                </div>
-                <CardDescription className="line-clamp-2">
-                  {template.description || "No description"}
-                </CardDescription>
-              </CardHeader>
-              <CardContent className="mt-auto flex flex-col gap-3">
-                <div className="flex flex-wrap gap-1.5">
-                  <Badge variant="outline">
-                    {categoryLabel(template.category)}
-                  </Badge>
-                  <Badge variant="outline">
-                    {template.canvas.width}×{template.canvas.height}
-                  </Badge>
-                  {template.composer_scene_id ? (
-                    <Badge variant="outline">Scene linked</Badge>
-                  ) : (
-                    <Badge variant="outline">Scaffold</Badge>
-                  )}
-                </div>
-                <div className="flex flex-wrap gap-2">
-                  <Link
-                    href={`/templates/${template.id}/design`}
-                    className={cn(buttonVariants({ size: "sm" }), "flex-1")}
-                  >
-                    Open Designer
-                  </Link>
-                  <Button
-                    type="button"
-                    size="sm"
-                    variant="outline"
-                    disabled={pending}
-                    onClick={() => duplicate(template.id)}
-                  >
-                    <Copy className="size-3.5" />
-                  </Button>
-                </div>
-              </CardContent>
-            </Card>
-          ))}
+                  <CardDescription className="line-clamp-2">
+                    {template.description || "No description"}
+                  </CardDescription>
+                </CardHeader>
+                <CardContent className="mt-auto flex flex-col gap-3">
+                  <div className="flex flex-wrap gap-1.5">
+                    <Badge variant="outline">
+                      {template.canvas.width}×{template.canvas.height}
+                    </Badge>
+                    <Badge variant="outline">
+                      {(template.duration_ms / 1000).toFixed(1)}s
+                    </Badge>
+                    {layers != null ? (
+                      <Badge variant="outline">{layers} layers</Badge>
+                    ) : null}
+                  </div>
+                  <div className="flex flex-wrap gap-2">
+                    <Link
+                      href={`/templates/${template.id}/design`}
+                      className={cn(buttonVariants({ size: "sm" }), "flex-1")}
+                    >
+                      Open Designer
+                    </Link>
+                    <Button
+                      type="button"
+                      size="sm"
+                      variant="outline"
+                      title="Duplicate template"
+                      disabled={pending}
+                      onClick={() => duplicate(template.id)}
+                    >
+                      <Copy className="size-3.5" />
+                    </Button>
+                  </div>
+                </CardContent>
+              </Card>
+            );
+          })}
         </div>
       )}
     </div>

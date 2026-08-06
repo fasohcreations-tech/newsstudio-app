@@ -96,6 +96,8 @@ export function createSceneObject(input: {
           font_family: "Noto Sans Malayalam",
           font_size: 32,
           font_weight: 700,
+          italic: false,
+          underline: false,
           color: "#FFFFFF",
           line_height: 1.35,
           letter_spacing: 0,
@@ -103,10 +105,18 @@ export function createSceneObject(input: {
           vertical_alignment: "middle",
           unicode_script: "malayalam",
           input_mode: "unicode",
-          auto_resize: true,
+          auto_resize: false,
+          auto_width: false,
+          auto_height: false,
+          auto_wrap: true,
           wrap: true,
-          corner_radius: input.objectType === "rounded_rectangle" ? 12 : 4,
-          fill: "rgba(15,23,42,0.92)",
+          padding: { top: 8, right: 12, bottom: 8, left: 12 },
+          text_stroke: null,
+          text_shadow: null,
+          text_glow: null,
+          text_gradient: null,
+          // Independent text object — not a filled rectangle with a label.
+          fill: "transparent",
         }
       : {
           fill:

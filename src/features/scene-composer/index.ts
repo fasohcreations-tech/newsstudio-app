@@ -43,6 +43,27 @@ export {
   upgradeToComposerDocument,
   exportComposerJson,
 } from "@/features/scene-composer/lib/object-factory";
+export {
+  LayerFactory,
+  LAYER_CATEGORY_LABELS,
+  LAYER_CATEGORY_ORDER,
+  LAYER_MENU_CATALOG,
+} from "@/features/scene-composer/lib/layer-factory";
+export type {
+  LayerKind,
+  LayerCategory,
+  LayerMenuItem,
+  LayerFactoryOptions,
+} from "@/features/scene-composer/lib/layer-factory";
+export {
+  TEXT_LAYER_BINDING_KEYS,
+  defaultIndependentTextStyle,
+  resolveTextLayerStyle,
+  textLayerStyleToCss,
+  parseTextBindingToken,
+  storyFieldForTextBinding,
+} from "@/features/scene-composer/lib/text-layer";
+export type { TextLayerStyle } from "@/features/scene-composer/lib/text-layer";
 export * from "@/features/scene-composer/lib/motion-animation";
 export * from "@/features/scene-composer/lib/motion-presets";
 export * from "@/features/scene-composer/lib/broadcast-effects";

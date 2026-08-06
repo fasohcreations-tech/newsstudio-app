@@ -29,6 +29,14 @@ export type EdgeSweepStyle =
   | "gold"
   | "broadcast_blue";
 
+/** Per-side path inset from the layer edges (px). Positive = inward. */
+export type EdgeSweepSideMargins = {
+  top: number;
+  right: number;
+  bottom: number;
+  left: number;
+};
+
 export type EdgeSweepConfig = {
   version: 1;
   enabled: boolean;
@@ -52,6 +60,14 @@ export type EdgeSweepConfig = {
   /** Trail fraction relative to primary length. */
   trailLength: number;
   trailFade: number;
+  /**
+   * Uniform extra inset of the sweep path from the item edges (px).
+   * Positive pulls the run inward; negative pushes it outward.
+   * Ignored when `margins` is set.
+   */
+  margin: number;
+  /** Per-side path insets; null = use uniform `margin` on all sides. */
+  margins: EdgeSweepSideMargins | null;
 };
 
 export type EdgeSweepBehaviorState = {

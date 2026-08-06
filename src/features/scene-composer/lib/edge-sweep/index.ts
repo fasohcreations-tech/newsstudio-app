@@ -23,5 +23,7 @@ export {
   needsGnn001EdgeSweepDemoPatch,
   patchGnn001EdgeSweepDemos,
   resolveCornerRadius,
+  resolveEdgeSweepSideMargins,
+  resolveEdgeSweepPathBox,
   roundedRectPerimeter,
 } from "@/features/scene-composer/lib/edge-sweep/apply";

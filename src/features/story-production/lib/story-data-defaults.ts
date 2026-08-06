@@ -53,8 +53,14 @@ export function createDemoStoryData(storyId = "GNN-DEMO-001"): StoryDataRecord {
       DEMO_ASSET_PATHS.image2,
       DEMO_ASSET_PATHS.image3,
     ].join(","),
-    background_video: DEMO_ASSET_PATHS.backgroundVideo,
-    background_image: DEMO_ASSET_PATHS.image2,
+    background_video: "",
+    background_image: "",
+    background_transition_style: "fade",
+    background_slide_interval_ms: "5000",
+    background_transition_ms: "600",
+    background_slide_index: "0",
+    background_fit: "contain",
+    background_autoplay: "true",
     logo: DEMO_ASSET_PATHS.logo,
     watermark: DEMO_ASSET_PATHS.logo,
     voice_over: DEMO_ASSET_PATHS.voiceOver,
@@ -184,6 +190,16 @@ export function createEmptyStoryData(): StoryDataRecord {
   empty.video_bottom_bar_opacity = "0.72";
   empty.video_animation_preset = "none";
   empty.animation_preset = "none";
+  empty.optional_info_slide_interval_ms = "3500";
+  empty.optional_info_transition_ms = "450";
+  empty.optional_info_transition_style = "fade";
+  empty.optional_info_slide_index = "0";
+  empty.background_transition_style = "fade";
+  empty.background_slide_interval_ms = "5000";
+  empty.background_transition_ms = "600";
+  empty.background_slide_index = "0";
+  empty.background_fit = "contain";
+  empty.background_autoplay = "true";
   empty.font_family = DEFAULT_MALAYALAM_FONT_VALUE;
   return empty;
 }

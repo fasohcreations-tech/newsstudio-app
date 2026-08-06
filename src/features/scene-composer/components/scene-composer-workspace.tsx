@@ -29,8 +29,12 @@ import {
 } from "@/features/scene-composer/actions/scene-composer.actions";
 import { EditorCanvas } from "@/features/scene-composer/components/editor/editor-canvas";
 import { EDITOR_UI } from "@/features/scene-composer/components/editor/editor.constants";
+import { EditorMenuBar } from "@/features/scene-composer/components/editor/editor-menu-bar";
 import { EnhancedTimelinePanel } from "@/features/scene-composer/components/editor/enhanced-timeline-panel";
-import { PropertyInspectorPanel } from "@/features/scene-composer/components/editor/property-inspector-panel";
+import {
+  PropertyInspectorPanel,
+  type InspectorTab,
+} from "@/features/scene-composer/components/editor/property-inspector-panel";
 import { SceneHistoryPanel } from "@/features/scene-composer/components/scene-history-panel";
 import { WORKFLOW_STATE_LABELS } from "@/features/scene-composer/constants/scene-composer.constants";
 import {
@@ -38,8 +42,19 @@ import {
   useComposerDocument,
 } from "@/features/scene-composer/hooks/use-composer-document";
 import { useComposerCanvas } from "@/features/scene-composer/hooks/use-composer-canvas";
+import { useEditorCommands } from "@/features/scene-composer/hooks/use-editor-commands";
+import { useEditorHotkeys } from "@/features/scene-composer/hooks/use-editor-hotkeys";
 import { isLockedMasterTemplate } from "@/features/story-scene-builder/lib/master-template-guard";
 import { useComposerPlayback } from "@/features/scene-composer/hooks/use-composer-playback";
+import {
+  LayerFactory,
+  type LayerKind,
+} from "@/features/scene-composer/lib/layer-factory";
+import {
+  parseTextBindingToken,
+  storyFieldForTextBinding,
+} from "@/features/scene-composer/lib/text-layer";
+import { isTextLikeObject } from "@/features/story-production/services/story-preview.service";
 import {
   areShapesEnabledOnAllLayers,
   disableShapeComposerOnAllLayers,
@@ -64,6 +79,15 @@ import {
 import { useStoryDataForm } from "@/features/story-production/hooks/use-story-data-form";
 import { useResolvedStoryBindings } from "@/features/story-production/hooks/use-resolved-story-bindings";
 import {
+  appendMediaContainerSlide,
+  getMediaContainerConfig,
+  isBackgroundContainerObject,
+  isMediaSlideContainerObject,
+  mediaContainerResolveKey,
+  mediaContainerToBackgroundStoryPatch,
+  patchMediaContainerConfig,
+} from "@/features/scene-composer/lib/media-container";
+import {
   defaultTargetForAssetCategory,
   resolveMediaTargetForObject,
   type StoryMediaTarget,
@@ -80,6 +104,11 @@ type SceneComposerWorkspaceProps = {
   components: SceneComponent[];
   projectId?: string | null;
   trackId?: string | null;
+  /** Opens the Property Inspector on a specific tab (Template Designer deep links). */
+  initialInspectorTab?: InspectorTab;
+  /** Where the back arrow returns to — Scene Library by default. */
+  backHref?: string;
+  backLabel?: string;
 };
 
 export function SceneComposerWorkspace({
@@ -89,6 +118,9 @@ export function SceneComposerWorkspace({
   components: _components,
   projectId,
   trackId,
+  initialInspectorTab,
+  backHref = "/creative-studio/scenes",
+  backLabel = "Scene Library",
 }: SceneComposerWorkspaceProps) {
   const router = useRouter();
   const composer = useComposerDocument(initialScene);
@@ -127,6 +159,17 @@ export function SceneComposerWorkspace({
       null
     );
   }, [canvas.selection.primaryObjectId, composer.scene.composer_document.objects]);
+
+  const selectedObjects = useMemo(() => {
+    const ids = new Set(canvas.selection.selectedObjectIds);
+    if (ids.size === 0) return [];
+    return composer.scene.composer_document.objects.filter((object) =>
+      ids.has(object.id),
+    );
+  }, [
+    canvas.selection.selectedObjectIds,
+    composer.scene.composer_document.objects,
+  ]);
 
   const masterLocked = useMemo(
     () =>
@@ -244,7 +287,25 @@ export function SceneComposerWorkspace({
     onBindingsChange: handleBindingsChange,
   });
 
-  const previewBindings = useResolvedStoryBindings(storyForm.bindings);
+  const selectedObjectRef = useRef(selectedObject);
+  selectedObjectRef.current = selectedObject;
+
+  const containerSlideBindings = useMemo(() => {
+    const out: Record<string, string> = {};
+    for (const obj of composer.scene.composer_document.objects) {
+      if (!isMediaSlideContainerObject(obj)) continue;
+      const cfg = getMediaContainerConfig(obj, storyForm.bindings);
+      if (cfg.slides.trim()) {
+        out[mediaContainerResolveKey(obj.id)] = cfg.slides;
+      }
+    }
+    return out;
+  }, [composer.scene.composer_document.objects, storyForm.bindings]);
+
+  const previewBindings = useResolvedStoryBindings({
+    ...storyForm.bindings,
+    ...containerSlideBindings,
+  });
 
   useEffect(() => {
     setMounted(true);
@@ -400,9 +461,89 @@ export function SceneComposerWorkspace({
     [composer, schedule],
   );
 
+  const objectsRef = useRef(composer.scene.composer_document.objects);
+  objectsRef.current = composer.scene.composer_document.objects;
+  const clipboardRef = useRef<SceneObject[]>([]);
+  const [zoomPresetRequest, setZoomPresetRequest] = useState<{
+    key: number;
+    mode: "fit" | "absolute";
+    zoom?: number;
+  } | null>(null);
+  const [editingObjectId, setEditingObjectId] = useState<string | null>(null);
+
+  const commands = useEditorCommands({
+    getObjects: () => objectsRef.current,
+    replaceSilent: (objects) => {
+      composer.replaceObjectsSilent(objects);
+      schedule();
+    },
+    commitChange: (next, previous, label) => {
+      composer.commitObjectsChange(next, previous, label);
+      schedule();
+    },
+  });
+
+  const selectIds = useCallback(
+    (ids: string[]) => {
+      canvas.selectObjects(ids);
+    },
+    [canvas],
+  );
+
+  const beginTextEdit = useCallback(
+    (objectId: string) => {
+      const object = objectsRef.current.find((item) => item.id === objectId);
+      if (!object || object.locked || !isTextLikeObject(object)) return;
+      canvas.selectObject(objectId);
+      setEditingObjectId(objectId);
+    },
+    [canvas],
+  );
+
+  const cancelTextEdit = useCallback(() => {
+    setEditingObjectId(null);
+  }, []);
+
+  const commitTextEdit = useCallback(
+    (objectId: string, text: string) => {
+      setEditingObjectId(null);
+      const object = objectsRef.current.find((item) => item.id === objectId);
+      if (!object) return;
+      const next = text.replace(/\u00a0/g, " ").replace(/\n$/, "");
+      const token =
+        parseTextBindingToken(object.bindings.text) ??
+        parseTextBindingToken(
+          typeof object.content.text === "string" ? object.content.text : "",
+        );
+      if (token) {
+        const field = storyFieldForTextBinding(token);
+        if (field) {
+          // Bound text edits the story field so preview + renderer update live.
+          storyForm.updateField(field, next);
+          return;
+        }
+      }
+      commands.updateObject(objectId, {
+        content: { ...object.content, text: next },
+      });
+      schedule();
+    },
+    [commands, schedule, storyForm],
+  );
+
+  // Leaving selection exits text edit mode (ESC is handled by the editor).
+  useEffect(() => {
+    if (!editingObjectId) return;
+    if (!canvas.selection.selectedObjectIds.includes(editingObjectId)) {
+      setEditingObjectId(null);
+    }
+  }, [canvas.selection.selectedObjectIds, editingObjectId]);
+
   const patchObject = useCallback(
     (id: string, patch: Partial<SceneObject>) => {
-      const objects = composer.scene.composer_document.objects;
+      // Always read latest objects — a stale scene closure made Visible/Locked
+      // bail out after the first toggle (e.g. off→on looked like a no-op).
+      const objects = objectsRef.current;
       const current = objects.find((object) => object.id === id);
       if (!current) return;
 
@@ -419,6 +560,8 @@ export function SceneComposerWorkspace({
         content: patch.content
           ? { ...current.content, ...patch.content }
           : current.content,
+        bindings:
+          patch.bindings !== undefined ? patch.bindings : current.bindings,
       };
 
       // Bail when Select/Switch mount-sync would rewrite identical data.
@@ -428,6 +571,7 @@ export function SceneComposerWorkspace({
           transform: current.transform,
           metadata: current.metadata,
           content: current.content,
+          bindings: current.bindings,
           name: current.name,
           visible: current.visible,
           locked: current.locked,
@@ -438,6 +582,7 @@ export function SceneComposerWorkspace({
           transform: merged.transform,
           metadata: merged.metadata,
           content: merged.content,
+          bindings: merged.bindings,
           name: merged.name,
           visible: merged.visible,
           locked: merged.locked,
@@ -447,12 +592,47 @@ export function SceneComposerWorkspace({
         return;
       }
 
-      setObjects(
-        objects.map((object) => (object.id === id ? merged : object)),
-        "Update object",
-      );
+      commands.updateObject(id, {
+        ...patch,
+        style: merged.style,
+        transform: merged.transform,
+        metadata: merged.metadata,
+        content: merged.content,
+        bindings: merged.bindings,
+      });
+      schedule();
     },
-    [composer.scene.composer_document.objects, setObjects],
+    [commands, schedule],
+  );
+
+  const applyMediaToSelection = useCallback(
+    (url: string) => {
+      const object = selectedObjectRef.current;
+      if (!object || !isMediaSlideContainerObject(object)) {
+        return false;
+      }
+      const cfg = getMediaContainerConfig(object, storyForm.bindings);
+      const incoming = url.includes(",")
+        ? url.split(",").map((part) => part.trim()).filter(Boolean).at(-1) ??
+          url
+        : url;
+      const nextSlides = appendMediaContainerSlide(cfg.slides, incoming);
+      const patched = patchMediaContainerConfig(
+        object,
+        { slides: nextSlides },
+        storyForm.bindings,
+      );
+      patchObject(object.id, { content: patched.content });
+      if (isBackgroundContainerObject(object)) {
+        storyForm.patchFields(
+          mediaContainerToBackgroundStoryPatch(
+            getMediaContainerConfig(patched, storyForm.bindings),
+          ),
+        );
+      }
+      return true;
+    },
+    [patchObject, storyForm],
   );
 
   const applyObjectTransform = useCallback(
@@ -462,54 +642,69 @@ export function SceneComposerWorkspace({
       mode: "live" | "commit",
       origin?: SceneObject["transform"],
     ) => {
-      const objects = composer.scene.composer_document.objects;
       if (mode === "live") {
-        composer.replaceObjectsSilent(
-          objects.map((object) =>
-            object.id === id
-              ? { ...object, transform: { ...object.transform, ...transform } }
-              : object,
-          ),
-        );
-        schedule();
+        commands.previewTransform(id, transform);
         return;
       }
-
-      const previousObjects = objects.map((object) =>
-        object.id === id
-          ? {
-              ...object,
-              transform: {
-                ...object.transform,
-                ...(origin ?? object.transform),
-              },
-            }
-          : object,
-      );
-      const nextObjects = objects.map((object) =>
-        object.id === id
-          ? { ...object, transform: { ...object.transform, ...transform } }
-          : object,
-      );
-      composer.commitObjectsChange(
-        nextObjects,
-        previousObjects,
-        "Move / resize layer",
-      );
-      schedule();
+      commands.commitTransform(id, transform, origin ?? transform);
     },
-    [composer, schedule],
+    [commands],
   );
 
   const addShapeObject = useCallback(
     (object: SceneObject) => {
-      setObjects(
-        [...composer.scene.composer_document.objects, object],
-        "Add shape",
+      commands.setObjects(
+        [...objectsRef.current, object],
+        "set_objects",
       );
       canvas.selectObject(object.id);
     },
-    [canvas, composer.scene.composer_document.objects, setObjects],
+    [canvas, commands],
+  );
+
+  const addLayer = useCallback(
+    (kind: LayerKind) => {
+      if (masterLocked) {
+        toast.error("Master template is locked — duplicate it to edit.");
+        return;
+      }
+      const settings = composer.scene.composer_settings;
+      const artboard =
+        settings.resolution_preset === "custom"
+          ? {
+              width: settings.custom_width,
+              height: settings.custom_height,
+            }
+          : (() => {
+              const [w, h] = settings.resolution_preset.split("x").map(Number);
+              return { width: w, height: h };
+            })();
+
+      const offset = (objectsRef.current.length % 6) * 16;
+      const created = LayerFactory.create(kind, {
+        durationMs: composer.scene.duration_ms,
+        sortOrder: objectsRef.current.length,
+        artboard,
+      });
+      const placed: SceneObject = {
+        ...created,
+        transform: {
+          ...created.transform,
+          x: created.transform.x + offset,
+          y: created.transform.y + offset,
+        },
+      };
+      commands.setObjects([...objectsRef.current, placed], "set_objects");
+      canvas.selectObject(placed.id);
+      toast.success(`Added ${placed.name}`);
+    },
+    [
+      canvas,
+      commands,
+      composer.scene.composer_settings,
+      composer.scene.duration_ms,
+      masterLocked,
+    ],
   );
 
   const allLayersShapeEnabled = useMemo(
@@ -540,46 +735,50 @@ export function SceneComposerWorkspace({
 
   const deleteObject = useCallback(
     (id: string) => {
-      setObjects(
-        composer.scene.composer_document.objects.filter(
-          (object) => object.id !== id,
-        ),
-        "Delete object",
-      );
-      if (canvas.selection.primaryObjectId === id) {
+      commands.deleteLayers([id]);
+      if (canvas.selection.selectedObjectIds.includes(id)) {
         canvas.selectObject(null);
       }
     },
-    [canvas, composer.scene.composer_document.objects, setObjects],
+    [canvas, commands],
   );
 
   const duplicateObject = useCallback(
     (object: SceneObject) => {
+      // Shape panel path may hand a freshly built object — prefer command duplicate.
+      const created = commands.duplicateLayers([object.id]);
+      if (created.length > 0) {
+        canvas.selectObject(created[0]!);
+        return;
+      }
       const copy = duplicateShapeObject(object);
-      setObjects(
-        [...composer.scene.composer_document.objects, copy],
-        "Duplicate shape",
-      );
+      commands.setObjects([...objectsRef.current, copy]);
       canvas.selectObject(copy.id);
     },
-    [canvas, composer.scene.composer_document.objects, setObjects],
+    [canvas, commands],
   );
 
-  useEffect(() => {
-    const onKeyDown = (event: KeyboardEvent) => {
-      if ((event.metaKey || event.ctrlKey) && event.key === "z") {
-        event.preventDefault();
-        if (event.shiftKey) composer.redo();
-        else composer.undo();
-      }
-      if ((event.metaKey || event.ctrlKey) && event.key === "s") {
-        event.preventDefault();
-        void saveScene(composer.scene, { checkpoint: true });
-      }
-    };
-    window.addEventListener("keydown", onKeyDown);
-    return () => window.removeEventListener("keydown", onKeyDown);
-  }, [composer, saveScene]);
+  const selectedIds = canvas.selection.selectedObjectIds;
+  const canEditSelection = selectedIds.length > 0 && !masterLocked;
+  const canGroup = selectedIds.length >= 2 && !masterLocked;
+  const selectedGroup =
+    selectedObject?.object_type === "group" ? selectedObject : null;
+
+  useEditorHotkeys({
+    enabled: !masterLocked,
+    commands,
+    objects: composer.scene.composer_document.objects,
+    selectedIds,
+    canUndo: composer.canUndo,
+    canRedo: composer.canRedo,
+    onUndo: () => composer.undo(),
+    onRedo: () => composer.redo(),
+    onSave: () => void saveScene(composer.scene, { checkpoint: true }),
+    onSelect: selectIds,
+    onSelectAll: () =>
+      selectIds(composer.scene.composer_document.objects.map((o) => o.id)),
+    clipboardRef,
+  });
 
   if (!mounted) {
     return (
@@ -597,8 +796,8 @@ export function SceneComposerWorkspace({
           size="sm"
           variant="ghost"
           className={EDITOR_UI.button}
-          aria-label="Back to Scene Library"
-          onClick={() => router.push("/creative-studio/scenes")}
+          aria-label={`Back to ${backLabel}`}
+          onClick={() => router.push(backHref)}
         >
           <ArrowLeft className="size-4" />
         </Button>
@@ -760,6 +959,56 @@ export function SceneComposerWorkspace({
         </span>
       </header>
 
+      <EditorMenuBar
+        canUndo={composer.canUndo}
+        canRedo={composer.canRedo}
+        canEditSelection={canEditSelection}
+        canGroup={canGroup}
+        canUngroup={Boolean(selectedGroup) && !masterLocked}
+        canAlign={selectedIds.length >= 2 && !masterLocked}
+        canAddLayer={!masterLocked}
+        onUndo={() => composer.undo()}
+        onRedo={() => composer.redo()}
+        onSave={() => void saveScene(composer.scene, { checkpoint: true })}
+        onCopy={() => {
+          clipboardRef.current = selectedObjects.map((object) =>
+            structuredClone(object),
+          );
+        }}
+        onPaste={() => {
+          const created = commands.pasteLayers(clipboardRef.current);
+          if (created.length > 0) selectIds(created);
+        }}
+        onDuplicate={() => {
+          const created = commands.duplicateLayers(selectedIds);
+          if (created.length > 0) selectIds(created);
+        }}
+        onDelete={() => {
+          commands.deleteLayers(selectedIds);
+          selectIds([]);
+        }}
+        onSelectAll={() =>
+          selectIds(composer.scene.composer_document.objects.map((o) => o.id))
+        }
+        onGroup={() => commands.groupLayers(selectedIds)}
+        onUngroup={() => {
+          if (!selectedGroup) return;
+          commands.ungroupLayer(selectedGroup.id);
+          selectIds([]);
+        }}
+        onAlign={(mode) => commands.align(selectedIds, mode)}
+        onAddLayer={addLayer}
+        onZoomFit={() =>
+          setZoomPresetRequest({ key: Date.now(), mode: "fit" })
+        }
+        onZoom100={() =>
+          setZoomPresetRequest({ key: Date.now(), mode: "absolute", zoom: 1 })
+        }
+        onZoom200={() =>
+          setZoomPresetRequest({ key: Date.now(), mode: "absolute", zoom: 2 })
+        }
+      />
+
       <div className="flex min-h-0 flex-1">
         <ResizablePanel
           storageKey="mediaos.composer.left-layers-v1"
@@ -774,7 +1023,13 @@ export function SceneComposerWorkspace({
               <ComposerLayersPanel
                 objects={composer.scene.composer_document.objects}
                 selectedIds={canvas.selection.selectedObjectIds}
-                onObjectsChange={setObjects}
+                disabled={masterLocked}
+                onAddLayer={addLayer}
+                onObjectsChange={(objects, label) => {
+                  // Layer panel still composes the next array; commit via commands.
+                  commands.setObjects(objects);
+                  void label;
+                }}
                 onSelect={(id, additive) => {
                   canvas.selectObject(id, additive);
                   if (id) {
@@ -808,21 +1063,28 @@ export function SceneComposerWorkspace({
               aspect={previewAspect}
               viewport={canvas.viewport}
               selectedObject={selectedObject}
+              selectedObjects={selectedObjects}
               isPanning={canvas.isPanning}
               spaceHeld={canvas.spaceHeld}
               onSelectObject={canvas.selectObject}
+              onSelectObjects={selectIds}
               onPan={canvas.panBy}
               onSetZoom={canvas.setZoom}
               onFitZoom={canvas.setFitZoom}
               onToggle={canvas.toggle}
               onSetPanning={canvas.setIsPanning}
               onBrowseMedia={handleBrowseFromCanvas}
+              zoomPresetRequest={zoomPresetRequest}
               onTransformLive={(id, transform) =>
                 applyObjectTransform(id, transform, "live")
               }
               onTransformCommit={(id, transform, origin) =>
                 applyObjectTransform(id, transform, "commit", origin)
               }
+              editingObjectId={editingObjectId}
+              onBeginTextEdit={beginTextEdit}
+              onCommitTextEdit={commitTextEdit}
+              onCancelTextEdit={cancelTextEdit}
             />
           </div>
           <EnhancedTimelinePanel
@@ -863,6 +1125,7 @@ export function SceneComposerWorkspace({
                 : null
             }
             instanceMode={Boolean(storyForm.isStoryInstance)}
+            initialTab={initialInspectorTab}
             onFieldChange={storyForm.updateField}
             onFieldsPatch={storyForm.patchFields}
             onObjectPatch={patchObject}
@@ -909,7 +1172,21 @@ export function SceneComposerWorkspace({
           <div className="h-full min-h-0">
             <StoryAssetsPanel
               onApplyMedia={(field, url) => {
-                storyForm.applyMedia(field, url);
+                if (applyMediaToSelection(url)) {
+                  setMediaBrowserOpen(false);
+                  return;
+                }
+                if (
+                  field === "background_video" ||
+                  field === "background_image"
+                ) {
+                  storyForm.patchFields({
+                    background_video: url,
+                    background_image: "",
+                  });
+                } else {
+                  storyForm.applyMedia(field, url);
+                }
                 setMediaBrowserOpen(false);
               }}
               data={storyForm.data}

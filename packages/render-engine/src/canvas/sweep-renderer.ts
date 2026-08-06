@@ -109,7 +109,11 @@ export function drawLightSweep(
   const bandHalf = span * (Math.min(60, Math.max(4, sweep.width)) / 100) * 0.5 +
     span * 0.03;
   const travel = span + bandHalf * 2;
-  const center = minP - bandHalf + sweep.progress * travel;
+  const startT = Math.min(1, Math.max(0, (sweep.start ?? 0) / 100));
+  const endT = Math.min(1, Math.max(0, (sweep.end ?? 100) / 100));
+  const from = minP - bandHalf + startT * travel;
+  const to = minP - bandHalf + endT * travel;
+  const center = from + sweep.progress * (to - from);
 
   // Gradient endpoints along the axis: value peaks at `center`.
   const g0 = center - bandHalf;
@@ -124,8 +128,21 @@ export function drawLightSweep(
 
   ctx.save();
   ctx.beginPath();
-  ctx.rect(x, y, w, h);
-  ctx.clip();
+  if (sweep.outlinePath && typeof Path2D !== "undefined") {
+    const path = new Path2D();
+    path.addPath(new Path2D(sweep.outlinePath), {
+      a: 1,
+      b: 0,
+      c: 0,
+      d: 1,
+      e: box.x + (sweep.outlineOffsetX ?? 0),
+      f: box.y + (sweep.outlineOffsetY ?? 0),
+    } as DOMMatrix2DInit);
+    ctx.clip(path);
+  } else {
+    ctx.rect(x, y, w, h);
+    ctx.clip();
+  }
   ctx.globalCompositeOperation = blendToComposite(sweep.blendMode);
   ctx.fillStyle = grad;
   ctx.fillRect(x, y, w, h);
@@ -224,11 +241,58 @@ export function drawEdgeSweep(
   sweep: RuntimeEdgeSweep,
   box: { x: number; y: number; width: number; height: number },
 ) {
-  const { x, y, width: w, height: h } = box;
-  if (w <= 0 || h <= 0) return;
+  const { x: boxX, y: boxY, width: boxW, height: boxH } = box;
+  if (boxW <= 0 || boxH <= 0) return;
 
   const STEPS = 480;
-  const ring = perimeterPoints(x, y, w, h, sweep.cornerRadius, STEPS);
+  let ring: Pt[];
+
+  if (sweep.outlinePoints && sweep.outlinePoints.length >= 8) {
+    // Resample authored outline into a dense ring in scene space.
+    const src = sweep.outlinePoints;
+    const edges: Array<{ a: Pt; b: Pt; len: number }> = [];
+    for (let i = 0; i < src.length; i += 1) {
+      const a = src[i]!;
+      const b = src[(i + 1) % src.length]!;
+      const len = Math.hypot(b[0] - a[0], b[1] - a[1]);
+      if (len > 0.001) edges.push({ a, b, len });
+    }
+    const total = edges.reduce((sum, e) => sum + e.len, 0);
+    ring = [];
+    if (total > 0) {
+      for (let i = 0; i < STEPS; i += 1) {
+        let d = (i / STEPS) * total;
+        for (const edge of edges) {
+          if (d <= edge.len) {
+            const t = d / edge.len;
+            ring.push([
+              boxX + edge.a[0] + (edge.b[0] - edge.a[0]) * t,
+              boxY + edge.a[1] + (edge.b[1] - edge.a[1]) * t,
+            ]);
+            break;
+          }
+          d -= edge.len;
+        }
+      }
+    }
+  } else {
+    const strokePad = Math.max(sweep.width * 0.5 + 0.5, 1.5);
+    const top = strokePad + (sweep.marginTop ?? 0);
+    const right = strokePad + (sweep.marginRight ?? 0);
+    const bottom = strokePad + (sweep.marginBottom ?? 0);
+    const left = strokePad + (sweep.marginLeft ?? 0);
+    const x = boxX + left;
+    const y = boxY + top;
+    const w = Math.max(1, boxW - left - right);
+    const h = Math.max(1, boxH - top - bottom);
+    const shrink = Math.min(top, right, bottom, left) * 0.35;
+    const cornerRadius = Math.max(
+      0,
+      Math.min(sweep.cornerRadius, Math.min(w, h) / 2) - Math.max(0, shrink),
+    );
+    ring = perimeterPoints(x, y, w, h, cornerRadius, STEPS);
+  }
+
   if (ring.length === 0) return;
 
   const headIdx = Math.floor(sweep.progress * STEPS) % STEPS;
@@ -236,8 +300,6 @@ export function drawEdgeSweep(
   const trailLen = Math.max(0, Math.round(sweep.trailLength * arcLen));
 
   ctx.save();
-  // Demo presets use blendMode "normal" — forcing additive blending made the
-  // blue rim invisible on the white lower-information panel.
   ctx.globalCompositeOperation = blendToComposite(sweep.blendMode);
   ctx.lineCap = "round";
   ctx.lineJoin = "round";
@@ -247,12 +309,11 @@ export function drawEdgeSweep(
     ctx.shadowBlur = Math.max(4, sweep.width * 3 * sweep.glowIntensity);
   }
 
-  // Draw as short segments so the head can fade out along the trail.
   const total = arcLen + trailLen;
   for (let i = 0; i < total; i += 1) {
-    // i = 0 is the bright head, increasing i trails behind it.
     const a = ring[(headIdx - i + STEPS * 2) % STEPS]!;
     const b = ring[(headIdx - i - 1 + STEPS * 2) % STEPS]!;
+    if (!a || !b) continue;
     const fade =
       i < arcLen
         ? 1 - (i / Math.max(1, arcLen)) * 0.35

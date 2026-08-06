@@ -5,9 +5,12 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   getEdgeSweepConfig,
   resolveCornerRadius,
+  resolveEdgeSweepPathBox,
+  resolveEdgeSweepSideMargins,
   roundedRectPerimeter,
 } from "@/features/scene-composer/lib/edge-sweep";
 import type { EdgeSweepConfig } from "@/features/scene-composer/lib/edge-sweep";
+import { resolveObjectShapeOutline } from "@/features/scene-composer/lib/shape-composer";
 import type { SceneObject } from "@/features/scene-composer/types/scene-composer.types";
 
 type EdgeSweepOverlayProps = {
@@ -61,7 +64,8 @@ function dashPattern(config: EdgeSweepConfig, perimeter: number): string {
 }
 
 /**
- * GPU-friendly SVG perimeter sweep — stroke-dashoffset only.
+ * GPU-friendly SVG perimeter sweep — follows Shape Composer outline when
+ * the layer is a polygon/star/ellipse/etc.; otherwise a rounded rect.
  */
 export function EdgeSweepOverlay({
   object,
@@ -71,34 +75,70 @@ export function EdgeSweepOverlay({
   hovered = false,
 }: EdgeSweepOverlayProps) {
   const config = getEdgeSweepConfig(object);
-  const pathRef = useRef<SVGRectElement>(null);
-  const trailRef = useRef<SVGRectElement>(null);
+  const pathRef = useRef<SVGGeometryElement | null>(null);
+  const trailRef = useRef<SVGGeometryElement | null>(null);
   const [onceDone, setOnceDone] = useState(false);
   const [sceneStarted, setSceneStarted] = useState(false);
   const [localPreviewNonce, setLocalPreviewNonce] = useState(0);
+  const [measuredPerimeter, setMeasuredPerimeter] = useState(0);
   const activePreviewNonce = previewNonce || localPreviewNonce;
 
   const width = Math.max(1, object.transform.width);
   const height = Math.max(1, object.transform.height);
+  const outline = useMemo(() => resolveObjectShapeOutline(object), [object]);
+  const useShapePath = Boolean(outline && !outline.rectLike);
+
   const radius = resolveCornerRadius(object, config);
-  // Keep the full stroke inside the object box (glow may still bloom outward).
-  const inset = Math.max(config.width + 1, 3);
+  const pathBox = resolveEdgeSweepPathBox(width, height, radius, config);
   const strokeColor = styleColor(config);
-  const perimeter = useMemo(
-    () =>
-      roundedRectPerimeter(
-        Math.max(1, width - inset * 2),
-        Math.max(1, height - inset * 2),
-        Math.max(0, radius - inset * 0.5),
-      ),
-    [width, height, radius, inset],
+
+  const rectPerimeter = useMemo(
+    () => roundedRectPerimeter(pathBox.width, pathBox.height, pathBox.rx),
+    [pathBox.width, pathBox.height, pathBox.rx],
   );
+  const perimeter = useShapePath
+    ? Math.max(1, measuredPerimeter || rectPerimeter)
+    : rectPerimeter;
+
   const dash = useMemo(
     () => dashPattern(config, perimeter),
-    // Primitives only — config object identity changes every parent render.
     // eslint-disable-next-line react-hooks/exhaustive-deps -- intentional
     [config.style, config.length, perimeter],
   );
+
+  const margins = resolveEdgeSweepSideMargins(config);
+  const avgMargin =
+    (margins.top + margins.right + margins.bottom + margins.left) / 4;
+  const shapeScale =
+    useShapePath && outline
+      ? Math.max(
+          0.15,
+          1 -
+            (avgMargin * 2) /
+              Math.min(outline.placementWidth, outline.placementHeight),
+        )
+      : 1;
+  const shapeTransform =
+    useShapePath && outline
+      ? `translate(${outline.offsetX} ${outline.offsetY}) translate(${outline.placementWidth / 2} ${outline.placementHeight / 2}) scale(${shapeScale}) translate(${-outline.placementWidth / 2} ${-outline.placementHeight / 2})`
+      : undefined;
+
+  useEffect(() => {
+    if (!useShapePath || !pathRef.current) return;
+    try {
+      const len = pathRef.current.getTotalLength();
+      if (Number.isFinite(len) && len > 0) setMeasuredPerimeter(len);
+    } catch {
+      /* path not ready */
+    }
+  }, [
+    useShapePath,
+    outline?.localD,
+    shapeScale,
+    width,
+    height,
+    config.width,
+  ]);
 
   useEffect(() => {
     if (isPlaying && playheadMs > 0) setSceneStarted(true);
@@ -159,9 +199,6 @@ export function EdgeSweepOverlay({
     [config.direction, perimeter],
   );
 
-  // Playback / render: sample the shared timeline clock. A wall-clock RAF would
-  // run at capture pacing rather than timeline pacing, which made the sweep
-  // speed in exported video unrelated to the speed in the editor.
   useEffect(() => {
     if (!isPlaying || !shouldAnimate) return;
     const localMs = Math.max(0, playheadMs - (object.start_ms ?? 0));
@@ -180,7 +217,6 @@ export function EdgeSweepOverlay({
     applyProgress,
   ]);
 
-  // Editor idle / hover preview keeps its own clock — there is no timeline yet.
   useEffect(() => {
     if (isPlaying || !shouldAnimate) return;
     if (!pathRef.current) return;
@@ -214,10 +250,6 @@ export function EdgeSweepOverlay({
 
   if (!config.enabled) return null;
 
-  const rx = Math.max(
-    0,
-    Math.min(radius, Math.min(width, height) / 2) - inset * 0.35,
-  );
   const glow = Math.max(0, config.glowIntensity);
   const opacity = Math.min(
     1,
@@ -225,6 +257,15 @@ export function EdgeSweepOverlay({
   );
   const trailOpacity = opacity * Math.max(0.2, 1 - config.trailFade * 0.85);
   const filterId = `edge-glow-${object.id.replace(/[^a-zA-Z0-9_-]/g, "")}`;
+  const strokeCommon = {
+    fill: "none" as const,
+    stroke: strokeColor,
+    strokeLinecap: "round" as const,
+    strokeLinejoin: "round" as const,
+    strokeDasharray: dash,
+    strokeDashoffset: 0,
+    filter: glow > 0.05 ? `url(#${filterId})` : undefined,
+  };
 
   return (
     <svg
@@ -243,13 +284,7 @@ export function EdgeSweepOverlay({
       }}
     >
       <defs>
-        <filter
-          id={filterId}
-          x="-50%"
-          y="-50%"
-          width="200%"
-          height="200%"
-        >
+        <filter id={filterId} x="-50%" y="-50%" width="200%" height="200%">
           <feGaussianBlur stdDeviation={1 + glow * 2.5} result="blur" />
           <feMerge>
             <feMergeNode in="blur" />
@@ -258,45 +293,55 @@ export function EdgeSweepOverlay({
         </filter>
       </defs>
 
-      {config.trailLength > 0.05 ? (
-        <rect
-          ref={trailRef}
-          x={inset}
-          y={inset}
-          width={Math.max(1, width - inset * 2)}
-          height={Math.max(1, height - inset * 2)}
-          rx={rx}
-          ry={rx}
-          fill="none"
-          stroke={strokeColor}
-          strokeWidth={Math.max(1.5, config.width * 0.85)}
-          strokeLinecap="round"
-          strokeLinejoin="round"
-          strokeDasharray={dash}
-          strokeDashoffset={0}
-          opacity={trailOpacity * 0.55}
-          filter={glow > 0.05 ? `url(#${filterId})` : undefined}
-        />
-      ) : null}
-
-      <rect
-        ref={pathRef}
-        x={inset}
-        y={inset}
-        width={Math.max(1, width - inset * 2)}
-        height={Math.max(1, height - inset * 2)}
-        rx={rx}
-        ry={rx}
-        fill="none"
-        stroke={strokeColor}
-        strokeWidth={Math.max(2, config.width)}
-        strokeLinecap="round"
-        strokeLinejoin="round"
-        strokeDasharray={dash}
-        strokeDashoffset={0}
-        opacity={opacity}
-        filter={glow > 0.05 ? `url(#${filterId})` : undefined}
-      />
+      {useShapePath && outline ? (
+        <g transform={shapeTransform}>
+          {config.trailLength > 0.05 ? (
+            <path
+              ref={trailRef as React.RefObject<SVGPathElement>}
+              d={outline.localD}
+              strokeWidth={Math.max(1.5, config.width * 0.85)}
+              opacity={trailOpacity * 0.55}
+              {...strokeCommon}
+            />
+          ) : null}
+          <path
+            ref={pathRef as React.RefObject<SVGPathElement>}
+            d={outline.localD}
+            strokeWidth={Math.max(2, config.width)}
+            opacity={opacity}
+            {...strokeCommon}
+          />
+        </g>
+      ) : (
+        <>
+          {config.trailLength > 0.05 ? (
+            <rect
+              ref={trailRef as React.RefObject<SVGRectElement>}
+              x={pathBox.x}
+              y={pathBox.y}
+              width={pathBox.width}
+              height={pathBox.height}
+              rx={pathBox.rx}
+              ry={pathBox.rx}
+              strokeWidth={Math.max(1.5, config.width * 0.85)}
+              opacity={trailOpacity * 0.55}
+              {...strokeCommon}
+            />
+          ) : null}
+          <rect
+            ref={pathRef as React.RefObject<SVGRectElement>}
+            x={pathBox.x}
+            y={pathBox.y}
+            width={pathBox.width}
+            height={pathBox.height}
+            rx={pathBox.rx}
+            ry={pathBox.rx}
+            strokeWidth={Math.max(2, config.width)}
+            opacity={opacity}
+            {...strokeCommon}
+          />
+        </>
+      )}
     </svg>
   );
 }

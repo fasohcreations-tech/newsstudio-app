@@ -1,13 +1,8 @@
-import {
-  renderTemplatePanelPage,
-  templatePanelMetadata,
-} from "@/features/template-designer/lib/render-template-panel";
+import { redirectToWorkspace } from "@/features/template-designer/lib/redirect-to-workspace";
 
 type PageProps = { params: Promise<{ templateId: string }> };
 
-export const metadata = templatePanelMetadata("bindings");
-
 export default async function Page({ params }: PageProps) {
   const { templateId } = await params;
-  return renderTemplatePanelPage(templateId, "bindings");
+  redirectToWorkspace(templateId, "bindings");
 }

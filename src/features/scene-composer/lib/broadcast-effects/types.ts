@@ -37,11 +37,34 @@ export type BroadcastEffectType =
   | "noise"
   | "particle_dust";
 
+/** Travel axis preset. `custom` uses `angle` degrees. */
+export type LightSweepPath =
+  | "horizontal"
+  | "vertical"
+  | "diagonal"
+  | "diagonal_alt"
+  | "custom";
+
 export type LightSweepEffectParams = {
   enabled: boolean;
-  /** Degrees — 45 = classic diagonal. */
+  /**
+   * Travel path preset. Presets write a matching `angle`; `custom` keeps
+   * whatever angle the user set.
+   */
+  path: LightSweepPath;
+  /** Degrees — used when path is `custom`, or synced from a preset. */
   angle: number;
-  /** Highlight peak thickness (0–80). Sweep always covers the full item. */
+  /**
+   * Where the highlight enters, 0–100 along the travel axis
+   * (0 = just before the near edge, 100 = just past the far edge).
+   */
+  start: number;
+  /**
+   * Where the highlight exits, 0–100 along the travel axis.
+   * Can be less than `start` to reverse travel without flipping direction.
+   */
+  end: number;
+  /** Highlight peak thickness (0–80). */
   width: number;
   opacity: number;
   /** Cycles per second. */

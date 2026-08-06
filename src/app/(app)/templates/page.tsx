@@ -1,9 +1,9 @@
 import type { Metadata } from "next";
 
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
+import { createMotionSceneService } from "@/features/motion-scene-engine/services/motion-scene.service.impl";
 import { TemplateLibraryHome } from "@/features/template-designer/components/template-library-home";
 import { requireTemplateContext } from "@/features/template-designer/lib/load-template";
-import { createTemplateDesignerService } from "@/features/template-designer/services/template-designer.service.impl";
 
 export const metadata: Metadata = {
   title: "Templates",
@@ -12,7 +12,8 @@ export const metadata: Metadata = {
 };
 
 export default async function TemplatesPage() {
-  const { membership, error } = await requireTemplateContext("/templates");
+  const { supabase, membership, error } =
+    await requireTemplateContext("/templates");
 
   if (!membership || error) {
     return (
@@ -27,8 +28,12 @@ export default async function TemplatesPage() {
     );
   }
 
-  const service = createTemplateDesignerService();
-  const result = await service.listTemplates(membership.organization.id);
+  // Templates are persisted composer scenes (`is_template = true`), which is
+  // what `listScenes` returns — so the designer and Scene Library never drift.
+  const motionService = createMotionSceneService(supabase);
+  const result = await motionService.listScenes(membership.organization.id, {
+    lightweight: true,
+  });
 
   return (
     <TemplateLibraryHome

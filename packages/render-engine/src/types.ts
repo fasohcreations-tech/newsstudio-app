@@ -91,9 +91,13 @@ export type RuntimeShape = {
 export type SweepBlendMode = string;
 
 export type RuntimeLightSweep = {
-  /** 0–1 across the box, or null while paused between loops. */
+  /** 0–1 along start→end, or null while paused between loops. */
   progress: number | null;
   angle: number;
+  /** Travel start along axis, 0–100. */
+  start: number;
+  /** Travel end along axis, 0–100. */
+  end: number;
   width: number;
   opacity: number;
   softness: number;
@@ -101,6 +105,13 @@ export type RuntimeLightSweep = {
   blendMode: SweepBlendMode;
   /** Optional box the sweep covers instead of the layer box (headline → panel). */
   coverage?: { left: number; top: number; width: number; height: number } | null;
+  /**
+   * Optional SVG path `d` in placement-local pixels.
+   * Combined with outlineOffsetX/Y to clip the light band to the shape.
+   */
+  outlinePath?: string | null;
+  outlineOffsetX?: number;
+  outlineOffsetY?: number;
 };
 
 export type RuntimeEdgeSweep = {
@@ -116,6 +127,16 @@ export type RuntimeEdgeSweep = {
   cornerRadius: number;
   trailLength: number;
   blendMode: SweepBlendMode;
+  /** Path inset from layer edges (px). Positive = inward. */
+  marginTop: number;
+  marginRight: number;
+  marginBottom: number;
+  marginLeft: number;
+  /**
+   * Optional perimeter samples in layer-local pixels (0..w / 0..h).
+   * When set, edge sweep walks this ring instead of a rounded rect.
+   */
+  outlinePoints?: Array<[number, number]> | null;
 };
 
 export type RuntimeSweeps = {
@@ -149,16 +170,34 @@ export type RuntimeLayer = {
   fontFamily?: string | null;
   fontSize?: number | null;
   fontWeight?: string | number | null;
+  fontStyle?: "normal" | "italic";
+  underline?: boolean;
   color?: string | null;
   textAlign?: CanvasTextAlign;
   /** Vertical alignment inside the layer box. */
   verticalAlign?: "top" | "middle" | "bottom";
   lineHeight?: number;
   letterSpacing?: number;
+  padding?: { top: number; right: number; bottom: number; left: number };
+  textStroke?: { color: string; width: number } | null;
+  textShadow?: {
+    color: string;
+    blur: number;
+    offsetX: number;
+    offsetY: number;
+  } | null;
+  textGlow?: { color: string; blur: number; strength: number } | null;
+  textGradient?: {
+    type: "linear" | "radial";
+    angle: number;
+    stops: Array<{ offset: number; color: string }>;
+  } | null;
   /** Solid fill painted behind the layer (lower-third panel, ticker bar). */
   backgroundFill?: string | null;
   /** When true text is a single non-wrapping line (ticker). */
   singleLine?: boolean;
+  /** When false, text does not wrap (mirrors auto_wrap=false). */
+  wrap?: boolean;
   mediaUrl?: string | null;
   mediaKind?: "video" | "image" | null;
   /** Optional-info regions cycle a playlist on the Timeline clock. */

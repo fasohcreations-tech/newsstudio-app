@@ -22,7 +22,9 @@ import { Switch } from "@/components/ui/switch";
 import { EDITOR_UI } from "@/features/scene-composer/components/editor/editor.constants";
 import {
   EFFECT_CATALOG,
+  LIGHT_SWEEP_PATH_OPTIONS,
   addEffect,
+  angleForLightSweepPath,
   duplicateEffect,
   getObjectEffectStack,
   removeEffect,
@@ -34,6 +36,7 @@ import {
 import type {
   BroadcastEffectInstance,
   BroadcastEffectType,
+  LightSweepPath,
 } from "@/features/scene-composer/lib/broadcast-effects";
 import type { SceneObject } from "@/features/scene-composer/types/scene-composer.types";
 
@@ -259,14 +262,53 @@ function EffectParamsEditor({
   const p = effect.params as Record<string, unknown>;
 
   if (effect.type === "light_sweep") {
+    const path = String(p.path ?? "diagonal") as LightSweepPath;
     return (
       <div className="grid grid-cols-2 gap-2">
+        <Field label="Path">
+          <Select
+            value={path}
+            onValueChange={(next) => {
+              const nextPath = String(next) as LightSweepPath;
+              const presetAngle = angleForLightSweepPath(nextPath);
+              onParams({
+                path: nextPath,
+                ...(presetAngle != null ? { angle: presetAngle } : {}),
+              });
+            }}
+          >
+            <SelectTrigger className={EDITOR_UI.input}>
+              <SelectValue />
+            </SelectTrigger>
+            <SelectContent>
+              {LIGHT_SWEEP_PATH_OPTIONS.map((option) => (
+                <SelectItem key={option.value} value={option.value}>
+                  {option.label}
+                </SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
+        </Field>
         <NumberField
           label="Angle"
           value={Number(p.angle ?? 45)}
           min={0}
           max={360}
-          onChange={(angle) => onParams({ angle })}
+          onChange={(angle) => onParams({ path: "custom", angle })}
+        />
+        <NumberField
+          label="Start %"
+          value={Number(p.start ?? 0)}
+          min={0}
+          max={100}
+          onChange={(start) => onParams({ start })}
+        />
+        <NumberField
+          label="End %"
+          value={Number(p.end ?? 100)}
+          min={0}
+          max={100}
+          onChange={(end) => onParams({ end })}
         />
         <NumberField
           label="Peak Width"
@@ -361,6 +403,11 @@ function EffectParamsEditor({
             onCheckedChange={(loop) => onParams({ loop })}
           />
         </div>
+        <p className={`${EDITOR_UI.helper} col-span-2`}>
+          Path sets the travel axis. Start/End % control where the highlight
+          enters and exits (0 = near edge, 100 = far edge). Set End below Start
+          to reverse travel without flipping Direction.
+        </p>
       </div>
     );
   }

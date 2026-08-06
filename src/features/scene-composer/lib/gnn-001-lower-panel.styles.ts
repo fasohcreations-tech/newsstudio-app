@@ -28,15 +28,17 @@ function isFrameLayerObject(object: SceneObject) {
   );
 }
 
-/** Runtime + document patch for white lower panel and black headline text. */
+/** Runtime + document patch for white lower panel chrome.
+ *  Headline/subheadline color is only defaulted when missing — Feature 043
+ *  lets designers override Color / Size freely.
+ */
 export function patchGnn001LowerPanelObjects(objects: SceneObject[]): SceneObject[] {
   let changed = false;
   const next = objects.map((object) => {
     if (isLowerInfoPanelObject(object)) {
       if (
         object.style.fill === GNN_001_LOWER_PANEL_FILL &&
-        object.style.border_color === GNN_001_LOWER_PANEL_BORDER &&
-        object.style.color === GNN_001_LOWER_PANEL_TEXT_COLOR
+        object.style.border_color === GNN_001_LOWER_PANEL_BORDER
       ) {
         return object;
       }
@@ -47,13 +49,15 @@ export function patchGnn001LowerPanelObjects(objects: SceneObject[]): SceneObjec
           ...object.style,
           fill: GNN_001_LOWER_PANEL_FILL,
           border_color: GNN_001_LOWER_PANEL_BORDER,
-          color: GNN_001_LOWER_PANEL_TEXT_COLOR,
         },
       };
     }
 
     if (isLowerPanelTextObject(object)) {
-      if (object.style.color === GNN_001_LOWER_PANEL_TEXT_COLOR) return object;
+      const hasColor =
+        typeof object.style.color === "string" &&
+        object.style.color.trim().length > 0;
+      if (hasColor) return object;
       changed = true;
       return {
         ...object,
@@ -118,10 +122,17 @@ export function gnn001LowerPanelFrameContent(
 export function needsGnn001LowerPanelPatch(objects: SceneObject[]): boolean {
   return objects.some((object) => {
     if (isLowerInfoPanelObject(object)) {
-      return object.style.fill !== GNN_001_LOWER_PANEL_FILL;
+      return (
+        object.style.fill !== GNN_001_LOWER_PANEL_FILL ||
+        object.style.border_color !== GNN_001_LOWER_PANEL_BORDER
+      );
     }
     if (isLowerPanelTextObject(object)) {
-      return object.style.color !== GNN_001_LOWER_PANEL_TEXT_COLOR;
+      // Only seed a default color when none is authored.
+      return !(
+        typeof object.style.color === "string" &&
+        object.style.color.trim().length > 0
+      );
     }
     if (isFrameLayerObject(object)) {
       return (

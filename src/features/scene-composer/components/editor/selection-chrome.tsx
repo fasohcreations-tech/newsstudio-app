@@ -2,6 +2,8 @@
 
 import { useEffect, useRef } from "react";
 
+import { computeAlignmentGuides } from "@/features/scene-composer/lib/alignment-guides";
+import type { AlignmentGuide } from "@/features/scene-composer/lib/alignment-guides";
 import {
   clampTransform,
   snapValue,
@@ -15,6 +17,7 @@ type ResizeHandle = "nw" | "n" | "ne" | "e" | "se" | "s" | "sw" | "w";
 
 type SelectionChromeProps = {
   object: SceneObject;
+  siblings?: SceneObject[];
   showGuides?: boolean;
   artboardWidth: number;
   artboardHeight: number;
@@ -22,6 +25,7 @@ type SelectionChromeProps = {
   snapEnabled?: boolean;
   gridSize?: number;
   spaceHeld?: boolean;
+  onAlignmentGuides?: (guides: AlignmentGuide[]) => void;
   /** Live transform while dragging (no undo entry). */
   onTransformLive?: (transform: ObjectTransform) => void;
   /** Commit transform on pointer up (one undo entry). */
@@ -45,19 +49,31 @@ const HANDLES: ResizeHandle[] = [
 const MIN_SIZE = 8;
 
 type DragSession = {
-  mode: "move" | "resize";
+  mode: "move" | "resize" | "rotate";
   handle?: ResizeHandle;
   pointerId: number;
   startClientX: number;
   startClientY: number;
   origin: ObjectTransform;
+  /** Rotation only — box centre in client space + the pointer's starting angle. */
+  centerClientX?: number;
+  centerClientY?: number;
+  startAngleDeg?: number;
 };
 
+const ROTATE_SNAP_DEG = 15;
+
+function normalizeDeg(value: number): number {
+  const wrapped = value % 360;
+  return wrapped < 0 ? wrapped + 360 : wrapped;
+}
+
 /**
- * Selection outline + interactive move / resize handles.
+ * Selection outline + interactive move / resize / rotate handles.
  */
 export function SelectionChrome({
   object,
+  siblings = [],
   showGuides = true,
   artboardWidth,
   artboardHeight,
@@ -65,15 +81,23 @@ export function SelectionChrome({
   snapEnabled = false,
   gridSize = 16,
   spaceHeld = false,
+  onAlignmentGuides,
   onTransformLive,
   onTransformCommit,
 }: SelectionChromeProps) {
-  const { x, y, width, height } = object.transform;
+  const { x, y, width, height, rotation } = object.transform;
   const cx = x + width / 2;
   const cy = y + height / 2;
   const dragRef = useRef<DragSession | null>(null);
+  const boxRef = useRef<HTMLDivElement | null>(null);
   const latestTransformRef = useRef(object.transform);
   latestTransformRef.current = object.transform;
+  const objectRef = useRef(object);
+  objectRef.current = object;
+  const siblingsRef = useRef(siblings);
+  siblingsRef.current = siblings;
+  const onGuidesRef = useRef(onAlignmentGuides);
+  onGuidesRef.current = onAlignmentGuides;
 
   useEffect(() => {
     const onMove = (event: PointerEvent) => {
@@ -86,11 +110,43 @@ export function SelectionChrome({
 
       let next: ObjectTransform;
       if (drag.mode === "move") {
+        let x = snapValue(drag.origin.x + dx, gridSize, snapEnabled);
+        let y = snapValue(drag.origin.y + dy, gridSize, snapEnabled);
+        const probe = {
+          ...objectRef.current,
+          transform: { ...drag.origin, x, y },
+        };
+        const { guides, snapped } = computeAlignmentGuides({
+          moving: probe,
+          siblings: siblingsRef.current,
+          artboard: { width: artboardWidth, height: artboardHeight },
+        });
+        x = snapped.x;
+        y = snapped.y;
+        onGuidesRef.current?.(guides);
+        next = { ...drag.origin, x, y };
+      } else if (drag.mode === "rotate") {
+        const angleNow =
+          (Math.atan2(
+            event.clientY - (drag.centerClientY ?? 0),
+            event.clientX - (drag.centerClientX ?? 0),
+          ) *
+            180) /
+          Math.PI;
+        const delta = angleNow - (drag.startAngleDeg ?? 0);
+        // Shift constrains to 15° steps, the usual broadcast-editor behaviour.
+        const raw = drag.origin.rotation + delta;
         next = {
           ...drag.origin,
-          x: snapValue(drag.origin.x + dx, gridSize, snapEnabled),
-          y: snapValue(drag.origin.y + dy, gridSize, snapEnabled),
+          rotation: normalizeDeg(
+            event.shiftKey
+              ? Math.round(raw / ROTATE_SNAP_DEG) * ROTATE_SNAP_DEG
+              : raw,
+          ),
         };
+        latestTransformRef.current = next;
+        onTransformLive?.(next);
+        return;
       } else {
         next = resizeFromHandle(drag.origin, drag.handle!, dx, dy);
         next = {
@@ -120,6 +176,7 @@ export function SelectionChrome({
       const drag = dragRef.current;
       if (!drag || event.pointerId !== drag.pointerId) return;
       dragRef.current = null;
+      onGuidesRef.current?.([]);
       onTransformCommit?.(latestTransformRef.current, drag.origin);
     };
 
@@ -143,7 +200,7 @@ export function SelectionChrome({
 
   const beginDrag = (
     event: React.PointerEvent,
-    mode: "move" | "resize",
+    mode: "move" | "resize" | "rotate",
     handle?: ResizeHandle,
   ) => {
     if (object.locked || spaceHeld) return;
@@ -151,7 +208,7 @@ export function SelectionChrome({
     event.preventDefault();
     event.stopPropagation();
 
-    dragRef.current = {
+    const session: DragSession = {
       mode,
       handle,
       pointerId: event.pointerId,
@@ -159,13 +216,30 @@ export function SelectionChrome({
       startClientY: event.clientY,
       origin: { ...object.transform },
     };
+
+    if (mode === "rotate") {
+      const box = boxRef.current?.getBoundingClientRect();
+      const centerX = box ? box.left + box.width / 2 : event.clientX;
+      const centerY = box ? box.top + box.height / 2 : event.clientY;
+      session.centerClientX = centerX;
+      session.centerClientY = centerY;
+      session.startAngleDeg =
+        (Math.atan2(event.clientY - centerY, event.clientX - centerX) * 180) /
+        Math.PI;
+    }
+
+    dragRef.current = session;
     latestTransformRef.current = object.transform;
   };
 
   const interactive = Boolean(onTransformLive || onTransformCommit) && !object.locked;
 
   return (
-    <div className="pointer-events-none absolute inset-0 z-40" aria-hidden={!interactive}>
+    <div
+      className="pointer-events-none absolute inset-0 z-40"
+      aria-hidden={!interactive}
+      data-selection-chrome
+    >
       {showGuides ? (
         <>
           <div
@@ -184,6 +258,7 @@ export function SelectionChrome({
       ) : null}
 
       <div
+        ref={boxRef}
         className={`absolute ${interactive ? "pointer-events-auto cursor-move" : ""}`}
         style={{
           left: x,
@@ -191,6 +266,9 @@ export function SelectionChrome({
           width,
           height,
           boxShadow: "0 0 0 2px #38BDF8",
+          // Match the rendered layer so the chrome tracks a rotated object.
+          transform: rotation ? `rotate(${rotation}deg)` : undefined,
+          transformOrigin: "center center",
         }}
         onPointerDown={(event) => beginDrag(event, "move")}
       >
@@ -200,7 +278,35 @@ export function SelectionChrome({
         >
           {object.name}
           {object.locked ? " · locked" : ""}
+          {rotation ? ` · ${Math.round(rotation)}°` : ""}
         </span>
+
+        <span
+          className={`absolute left-1/2 w-px bg-sky-400 ${
+            interactive ? "" : "opacity-50"
+          }`}
+          style={{ top: -26, height: 26 }}
+        />
+        <span
+          className={`absolute size-3 rounded-full border-2 border-sky-400 bg-white shadow ${
+            interactive ? "pointer-events-auto" : ""
+          }`}
+          style={{
+            left: width / 2 - 6,
+            top: -32,
+            cursor: interactive ? "grab" : undefined,
+          }}
+          title="Rotate (hold Shift for 15° steps)"
+          onPointerDown={(event) => beginDrag(event, "rotate")}
+        />
+
+        {/* Anchor / pivot point — visual gizmo at the transform centre. */}
+        <span
+          className="pointer-events-none absolute size-2.5 -translate-x-1/2 -translate-y-1/2 rounded-full border border-amber-300 bg-amber-400/90 shadow"
+          style={{ left: width / 2, top: height / 2 }}
+          title="Anchor"
+        />
+
         {HANDLES.map((handle) => {
           const style = handleStyle(handle, width, height);
           return (

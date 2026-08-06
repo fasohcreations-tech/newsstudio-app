@@ -62,6 +62,7 @@ import {
   resolvePlacement,
   resolveRevealConfig,
   resolveRevealExit,
+  shouldReplaceContentWithShape,
   smoothPathPoint,
   snapObjectToGrid,
   syncRevealExitBehavior,
@@ -69,6 +70,7 @@ import {
   toggleShapeLock,
   withExclusiveEntranceBehavior,
 } from "@/features/scene-composer/lib/shape-composer";
+import { SHAPE_METADATA_KEY } from "@/features/scene-composer/lib/shape-composer/types";
 import { SHAPE_BEHAVIOR_REPLAY_EVENT } from "@/features/scene-composer/components/editor/shape-renderer";
 import type {
   ShapeAnchor,
@@ -207,10 +209,18 @@ export function LayerShapePanel({
     // reference when nothing changed. Always-spreading here used to re-patch
     // → re-render → Select sync → convert again → max update depth.
     if (next === object) return;
+    const shape = next.metadata?.[SHAPE_METADATA_KEY];
     onObjectPatch(next.id, {
       style: { ...next.style },
       transform: { ...next.transform },
-      metadata: { ...next.metadata, shape: next.metadata.shape },
+      metadata: {
+        ...next.metadata,
+        // Always clone shape so fill/stroke patches are a new reference and
+        // survive patchObject's identical-data bail-out.
+        ...(shape && typeof shape === "object"
+          ? { [SHAPE_METADATA_KEY]: { ...(shape as Record<string, unknown>) } }
+          : null),
+      },
       content: { ...next.content },
       name: next.name,
       object_type: next.object_type,
@@ -224,6 +234,8 @@ export function LayerShapePanel({
     const base = config.enabled ? object : enableShapeComposer(object);
     commit(patchShapeConfig(base, { ...partial, enabled: true }));
   };
+
+  const isPureShape = shouldReplaceContentWithShape(object);
 
   const requestShapePreview = () => {
     window.dispatchEvent(
@@ -611,68 +623,78 @@ export function LayerShapePanel({
         <section className="space-y-3">
           <div className="grid grid-cols-2 gap-2">
             <Field label="Shape Color">
-              <Input
+              <input
                 type="color"
                 value={toColorInput(config.fill)}
                 onChange={(e) =>
                   patch({ fill: e.target.value, fillMode: "solid" })
                 }
-                className="h-9 p-1"
+                className="h-9 w-full cursor-pointer rounded-md border border-border/60 bg-transparent p-1"
               />
             </Field>
             <Field label="Border Color">
-              <Input
+              <input
                 type="color"
                 value={toColorInput(config.strokeColor)}
                 onChange={(e) =>
                   patch({
                     strokeColor: e.target.value,
                     strokeStyle:
-                      config.strokeStyle === "none" ? "solid" : config.strokeStyle,
+                      config.strokeStyle === "none"
+                        ? "solid"
+                        : config.strokeStyle,
                   })
                 }
-                className="h-9 p-1"
+                className="h-9 w-full cursor-pointer rounded-md border border-border/60 bg-transparent p-1"
               />
             </Field>
           </div>
-          <Field label="Layer Color">
-            <div className="flex items-center gap-2">
-              <Input
-                type="color"
-                value={toColorInput(
-                  typeof object.style.fill === "string"
-                    ? object.style.fill
-                    : "#FFFFFF",
-                )}
-                onChange={(e) =>
-                  onObjectPatch(object.id, {
-                    style: { ...object.style, fill: e.target.value },
-                  })
-                }
-                className="h-9 flex-1 p-1"
-              />
-              <Button
-                type="button"
-                size="sm"
-                variant="ghost"
-                className="h-9 shrink-0 text-[11px]"
-                onClick={() =>
-                  patch({
-                    fill:
-                      typeof object.style.fill === "string"
-                        ? object.style.fill
-                        : config.fill,
-                    fillMode: "solid",
-                  })
-                }
-              >
-                From layer
-              </Button>
-            </div>
+          {isPureShape ? (
             <p className={EDITOR_UI.helper}>
-              Original layer color shown after the shape exits.
+              Shape Color paints this layer. Border Color is the stroke.
             </p>
-          </Field>
+          ) : (
+            <Field label="Layer Color">
+              <div className="flex items-center gap-2">
+                <input
+                  type="color"
+                  value={toColorInput(
+                    typeof object.style.fill === "string"
+                      ? object.style.fill
+                      : "#FFFFFF",
+                  )}
+                  onChange={(e) =>
+                    onObjectPatch(object.id, {
+                      style: { ...object.style, fill: e.target.value },
+                    })
+                  }
+                  className="h-9 w-full flex-1 cursor-pointer rounded-md border border-border/60 bg-transparent p-1"
+                />
+                <Button
+                  type="button"
+                  size="sm"
+                  variant="ghost"
+                  className="h-9 shrink-0 text-[11px]"
+                  onClick={() =>
+                    patch({
+                      fill:
+                        typeof object.style.fill === "string" &&
+                        object.style.fill !== "transparent"
+                          ? object.style.fill
+                          : config.fill,
+                      fillMode: "solid",
+                    })
+                  }
+                >
+                  From layer
+                </Button>
+              </div>
+              <p className={EDITOR_UI.helper}>
+                Host layer color (visible after Reveal exits). Use Shape Color
+                for the shape fill itself.
+              </p>
+            </Field>
+          )}
         </section>
       ) : null}
 
@@ -1276,11 +1298,13 @@ export function LayerShapePanel({
             </Select>
           </Field>
           <Field label="Fill">
-            <Input
+            <input
               type="color"
               value={toColorInput(config.fill)}
-              onChange={(e) => patch({ fill: e.target.value, fillMode: "solid" })}
-              className="h-9 p-1"
+              onChange={(e) =>
+                patch({ fill: e.target.value, fillMode: "solid" })
+              }
+              className="h-9 w-full cursor-pointer rounded-md border border-border/60 bg-transparent p-1"
             />
           </Field>
           <Field label="Mask Source">
@@ -1813,10 +1837,21 @@ export function LayerShapePanel({
 }
 
 function toColorInput(value: string) {
-  if (value.startsWith("#") && (value.length === 7 || value.length === 4)) {
-    return value.length === 4
-      ? `#${value[1]}${value[1]}${value[2]}${value[2]}${value[3]}${value[3]}`
-      : value;
+  if (!value) return "#6366F1";
+  const trimmed = value.trim();
+  if (/^#[0-9a-fA-F]{6}$/.test(trimmed)) return trimmed;
+  if (/^#[0-9a-fA-F]{3}$/.test(trimmed)) {
+    return `#${trimmed[1]}${trimmed[1]}${trimmed[2]}${trimmed[2]}${trimmed[3]}${trimmed[3]}`;
+  }
+  const rgba = trimmed.match(
+    /^rgba?\(\s*([0-9.]+)\s*,\s*([0-9.]+)\s*,\s*([0-9.]+)(?:\s*,\s*[0-9.]+)?\s*\)$/i,
+  );
+  if (rgba) {
+    const toHex = (channel: string) => {
+      const n = Math.min(255, Math.max(0, Math.round(Number(channel))));
+      return n.toString(16).padStart(2, "0");
+    };
+    return `#${toHex(rgba[1])}${toHex(rgba[2])}${toHex(rgba[3])}`;
   }
   return "#6366F1";
 }

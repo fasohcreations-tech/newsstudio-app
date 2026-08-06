@@ -19,7 +19,10 @@ export const GNN_001_HEADLINE_LIGHT_SWEEP_ID = "fx-gnn001-headline-light-sweep";
 const DEMO_LIGHT_SWEEP_PARAMS: LightSweepEffectParams = {
   ...DEFAULT_LIGHT_SWEEP,
   enabled: true,
+  path: "custom",
   angle: 35,
+  start: 0,
+  end: 100,
   width: 22,
   opacity: 0.5,
   speed: 0.45,

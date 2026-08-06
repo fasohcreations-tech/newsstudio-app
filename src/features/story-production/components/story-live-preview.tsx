@@ -7,6 +7,13 @@ import {
   ReadablePlaceholder,
   placeholderKindForObject,
 } from "@/features/scene-composer/components/editor/readable-placeholder";
+import { TextLayerContent } from "@/features/scene-composer/components/editor/text-layer-content";
+import {
+  resolveTextLayerFontFamily,
+  resolveTextLayerStyle,
+  textLayerShellAlignCss,
+  textLayerStyleToCss,
+} from "@/features/scene-composer/lib/text-layer";
 import { Gnn001BroadcastBackground } from "@/features/scene-composer/components/gnn-001-broadcast-background";
 import { Gnn001BroadcastFrame } from "@/features/scene-composer/components/gnn-001-broadcast-frame";
 import { Gnn001MainVideoContainer } from "@/features/scene-composer/components/gnn-001-main-video-container";
@@ -33,11 +40,18 @@ import { GNN_001_MAIN_VIDEO_CONTAINER_SLUG } from "@/features/scene-composer/lib
 import { createGnn001MainVideoContainerObject } from "@/features/scene-composer/lib/gnn-001-main-video.factory";
 import { BroadcastEffectOverlays } from "@/features/scene-composer/components/editor/broadcast-effect-overlays";
 import { EdgeSweepOverlay } from "@/features/scene-composer/components/editor/edge-sweep-overlay";
+import { MediaSlideContainerView } from "@/features/scene-composer/components/editor/media-slide-container-view";
 import {
   ShapeRenderer,
   shouldRenderAsShape,
   shouldShowShapeOverlay,
 } from "@/features/scene-composer/components/editor/shape-renderer";
+import {
+  getMediaContainerConfig,
+  isSmartContainerObject,
+  mediaContainerResolveKey,
+  parseMediaContainerSlides,
+} from "@/features/scene-composer/lib/media-container";
 import { sampleLayerMotion } from "@/features/scene-composer/lib/motion-animation";
 import {
   findLowerInfoPanelObject,
@@ -52,7 +66,9 @@ import {
   patchGnn001EdgeSweepDemos,
 } from "@/features/scene-composer/lib/edge-sweep";
 import {
+  buildShapePathD,
   getShapeConfig,
+  isPureShapeObjectType,
   resolveRadii,
   resolveRevealConfig,
   sampleShapeBehaviors,
@@ -101,13 +117,19 @@ type StoryLivePreviewProps = {
   readOnly?: boolean;
   className?: string;
   selectedObjectId?: string | null;
-  onSelectObject?: (objectId: string | null) => void;
+  /** Second arg is additive (Ctrl/Shift multi-select) when provided by the editor. */
+  onSelectObject?: (objectId: string | null, additive?: boolean) => void;
   /** When true, objects are clickable for selection. */
   interactive?: boolean;
   /** Fill parent artboard without internal fit-to-window scaling. */
   fillParent?: boolean;
   /** Open media browser for a canvas object / placeholder. */
   onBrowseMedia?: (object: SceneObject) => void;
+  /** Feature 043 — double-click text edit mode. */
+  editingObjectId?: string | null;
+  onBeginTextEdit?: (objectId: string) => void;
+  onCommitTextEdit?: (objectId: string, text: string) => void;
+  onCancelTextEdit?: () => void;
 };
 
 function isSkeletonObject(object: SceneObject) {
@@ -239,6 +261,18 @@ function shapeGeometryClipPath(
       const r = resolveRadii(config, w, h).topLeft;
       return r > 0.5 ? `inset(0 round ${r}px)` : undefined;
     }
+    case "triangle":
+    case "polygon":
+    case "star":
+    case "arrow":
+    case "ribbon":
+    case "speech_bubble":
+    case "corner_accent":
+    case "svg_path":
+    case "custom_path": {
+      const d = buildShapePathD(config, w, h);
+      return d ? `path('${d}')` : undefined;
+    }
     default:
       return undefined;
   }
@@ -346,6 +380,7 @@ function SelectableShell({
   interactive,
   selected,
   onSelect,
+  onDoubleClick,
   children,
   style,
   className,
@@ -354,7 +389,8 @@ function SelectableShell({
   object: SceneObject;
   interactive?: boolean;
   selected: boolean;
-  onSelect?: (id: string) => void;
+  onSelect?: (id: string, additive?: boolean) => void;
+  onDoubleClick?: (id: string) => void;
   children: React.ReactNode;
   style?: React.CSSProperties;
   className?: string;
@@ -426,6 +462,10 @@ function SelectableShell({
     isMainVideoLayer ||
     object.object_type === "video" ||
     object.object_type === "image";
+  const isTextLayer = ["text", "rich_text", "ticker", "clock", "date"].includes(
+    object.object_type,
+  );
+  const isPureShapeLayer = isPureShapeObjectType(object.object_type);
   // Rim-only mode keeps media visible under the stroke. Reveal mode hides
   // media until the cover shape fully exits (same as other layers).
   const keepMediaVisible = isFrameOnly || (isMediaLayer && !revealDriving);
@@ -436,9 +476,11 @@ function SelectableShell({
     (clock.isPlaying
       ? localPlayheadMs < selfGateMs
       : needsShapeClock && shapeClockMs < selfGateMs);
-  // Other layers' shape intros must not blank the video.
+  // Other layers' shape intros must not blank text, video, or pure shapes.
   const peerIntroActive =
     !isMediaLayer &&
+    !isTextLayer &&
+    !isPureShapeLayer &&
     ((clock.isPlaying &&
       shapeGate.sceneIntroUntilMs > 0 &&
       clock.playheadMs < shapeGate.sceneIntroUntilMs) ||
@@ -447,15 +489,18 @@ function SelectableShell({
         shapeGate.previewObjectId !== object.id));
   // Hide content only while the cover is fully on (entrance/hold).
   // During exit, content is already underneath so the handoff is seamless.
+  // Text keeps glyphs visible unless this layer's own reveal cover is driving.
   const hideForOwnReveal =
     revealActive &&
     revealSample != null &&
     (revealSample.phase === "entrance" || revealSample.phase === "hold");
-  const originalHidden = revealDriving
+  const originalHidden = isTextLayer
     ? hideForOwnReveal
-    : keepMediaVisible
-      ? false
-      : selfIntroActive || peerIntroActive;
+    : revealDriving
+      ? hideForOwnReveal
+      : keepMediaVisible
+        ? false
+        : selfIntroActive || peerIntroActive;
   const shapeCovering = originalHidden && Boolean(shapeConfig);
   const contentOpacity = originalHidden
     ? 0
@@ -473,12 +518,13 @@ function SelectableShell({
       (b) => b.enabled && b.type === "light_sweep",
     ),
   );
-  // Cover shapes and frame rims stay above media while they run.
-  const shapeAboveContent =
-    keepMediaVisible ||
-    shapeIntroRunning ||
-    hasLightSweepBehavior ||
-    Boolean(revealDriving);
+  // Text plates sit behind glyphs; reveal covers / media frames stay above.
+  const shapeAboveContent = isTextLayer
+    ? Boolean(revealDriving)
+    : keepMediaVisible ||
+      shapeIntroRunning ||
+      hasLightSweepBehavior ||
+      Boolean(revealDriving);
   const showShapeOverlay =
     Boolean(shapeOverlay && shapeConfig?.enabled) &&
     (isFrameOnly ||
@@ -624,7 +670,19 @@ function SelectableShell({
         interactive
           ? (event) => {
               event.stopPropagation();
-              onSelect?.(object.id);
+              onSelect?.(
+                object.id,
+                event.shiftKey || event.metaKey || event.ctrlKey,
+              );
+            }
+          : undefined
+      }
+      onDoubleClick={
+        interactive && onDoubleClick
+          ? (event) => {
+              event.stopPropagation();
+              event.preventDefault();
+              onDoubleClick(object.id);
             }
           : undefined
       }
@@ -665,6 +723,7 @@ function SelectableShell({
             clockMs={clock.playheadMs}
             isPlaying={clock.isPlaying}
             lightSweepCoverage={lightSweepCoverage}
+            object={object}
           />
         </div>
       ) : null}
@@ -814,23 +873,32 @@ function PreviewObject({
   playheadMs,
   motionMode,
   lowerInfoPanel,
+  editingObjectId,
+  onBeginTextEdit,
+  onCommitTextEdit,
+  onCancelTextEdit,
 }: {
   object: SceneObject;
   bindings: Record<string, string>;
   artboard: { width: number; height: number };
   hideMainVideoChrome: boolean;
   selectedObjectId?: string | null;
-  onSelectObject?: (objectId: string | null) => void;
+  onSelectObject?: (objectId: string | null, additive?: boolean) => void;
   interactive?: boolean;
   onBrowseMedia?: (object: SceneObject) => void;
   hasMetaInfoBar: boolean;
   playheadMs: number;
   motionMode: "playback" | "edit";
   lowerInfoPanel?: SceneObject | null;
+  editingObjectId?: string | null;
+  onBeginTextEdit?: (objectId: string) => void;
+  onCommitTextEdit?: (objectId: string, text: string) => void;
+  onCancelTextEdit?: () => void;
 }) {
   const selected = selectedObjectId === object.id;
+  const editing = editingObjectId === object.id;
   const select = onSelectObject
-    ? (id: string) => onSelectObject(id)
+    ? (id: string, additive?: boolean) => onSelectObject(id, additive)
     : undefined;
   const regionKey =
     typeof object.metadata?.region_key === "string"
@@ -1131,8 +1199,67 @@ function PreviewObject({
         <Gnn001BroadcastBackground
           width={object.transform.width || artboard.width}
           height={object.transform.height || artboard.height}
+          object={object}
           content={object.content}
           bindings={bindings}
+          resolvedSlidesRaw={
+            bindings[mediaContainerResolveKey(object.id)] ?? null
+          }
+          clockMs={Math.max(0, playheadMs - object.start_ms)}
+          isPlaying={motionMode === "playback"}
+          onBrowseMedia={
+            onBrowseMedia ? () => onBrowseMedia(object) : undefined
+          }
+        />
+      </SelectableShell>
+    );
+  }
+
+  if (isSmartContainerObject(object)) {
+    const config = getMediaContainerConfig(object, bindings);
+    const { slides: _ignored, ...controls } = config;
+    const slides = parseMediaContainerSlides(
+      bindings[mediaContainerResolveKey(object.id)] ?? config.slides,
+    );
+    return (
+      <SelectableShell
+        object={object}
+        lightSweepCoverage={lightSweepCoverage}
+        interactive={interactive}
+        selected={selected}
+        onSelect={select}
+        className="absolute overflow-hidden"
+        style={withLayerMotion(
+          {
+            left: object.transform.x,
+            top: object.transform.y,
+            width: object.transform.width,
+            height: object.transform.height,
+            zIndex: 4,
+            background: slides.length
+              ? "transparent"
+              : "rgba(15, 23, 42, 0.55)",
+            border: selected
+              ? "1px solid rgba(56, 189, 248, 0.65)"
+              : "1px solid rgba(255,255,255,0.18)",
+          },
+          object,
+          playheadMs,
+          motionMode,
+        )}
+      >
+        <MediaSlideContainerView
+          width={object.transform.width}
+          height={object.transform.height}
+          slides={slides}
+          controls={controls}
+          clockMs={Math.max(0, playheadMs - object.start_ms)}
+          isPlaying={motionMode === "playback"}
+          emptyLabel="Smart Container"
+          onBrowseMedia={
+            onBrowseMedia ? () => onBrowseMedia(object) : undefined
+          }
+          dataLayer="smart_media_container"
         />
       </SelectableShell>
     );
@@ -1510,8 +1637,6 @@ function PreviewObject({
       : null;
   const displayLabel = rotatingSubHeadline || label;
   const primaryColor = bindings.primary_color ?? "#1D4ED8";
-  const storyFontResolved = resolveStoryMalayalamFont(bindings);
-  const fontFamily = storyMalayalamFontFamilyCss(storyFontResolved.family);
   const showPlaceholder = !hasResolvedContent(object, bindings, displayLabel);
 
   const baseStyle: React.CSSProperties = withLayerMotion(
@@ -1591,6 +1716,15 @@ function PreviewObject({
   }
 
   if (object.object_type === "ticker") {
+    const textStyle = resolveTextLayerStyle(object, bindings, {
+      fontSize: 22,
+      fontWeight: 600,
+      color: "#ffffff",
+    });
+    const layerFont = resolveTextLayerFontFamily(object, bindings);
+    const textCss = textLayerStyleToCss(textStyle, layerFont, {
+      singleLine: true,
+    });
     return (
       <SelectableShell
         object={object}
@@ -1598,23 +1732,29 @@ function PreviewObject({
         interactive={interactive}
         selected={selected}
         onSelect={select}
+        onDoubleClick={
+          interactive && onBeginTextEdit
+            ? () => onBeginTextEdit(object.id)
+            : undefined
+        }
         className="absolute overflow-hidden"
         style={{
           ...baseStyle,
+          ...textLayerShellAlignCss(textStyle),
           background: showPlaceholder ? "rgba(0,0,0,0.35)" : primaryColor,
-          color: "#fff",
-          fontFamily,
-          fontSize: Number(object.style.font_size ?? 22),
-          fontWeight: Number(object.style.font_weight ?? 600),
-          display: "flex",
-          alignItems: "center",
-          padding: "0 16px",
         }}
       >
-        {showPlaceholder ? (
+        {showPlaceholder && !editing ? (
           <ReadablePlaceholder kind="ticker" />
         ) : (
-          <span className="truncate">{label}</span>
+          <TextLayerContent
+            text={displayLabel}
+            editing={editing}
+            style={{ ...textCss, background: "transparent", height: "auto" }}
+            placeholder="Ticker"
+            onCommit={(next) => onCommitTextEdit?.(object.id, next)}
+            onCancel={() => onCancelTextEdit?.()}
+          />
         )}
       </SelectableShell>
     );
@@ -1629,9 +1769,32 @@ function PreviewObject({
       regionKey === "headline" || /headline/i.test(object.name);
     const isLowerPanelSubheadline =
       regionKey === "subheadline" || /subheadline/i.test(object.name);
-    const isLowerPanelHeadlineText = isLowerPanelHeadline || isLowerPanelSubheadline;
-    const defaultTextSize = isLowerPanelHeadline ? 48 : isLowerPanelSubheadline ? 28 : 24;
+    const isLowerPanelHeadlineText =
+      isLowerPanelHeadline || isLowerPanelSubheadline;
+    const defaultTextSize = isLowerPanelHeadline
+      ? 48
+      : isLowerPanelSubheadline
+        ? 28
+        : 24;
     const defaultTextWeight = isLowerPanelHeadline ? 800 : 600;
+    const textStyle = resolveTextLayerStyle(object, bindings, {
+      fontSize: defaultTextSize,
+      fontWeight: defaultTextWeight,
+      color: isLowerPanelHeadlineText
+        ? GNN_001_LOWER_PANEL_TEXT_COLOR
+        : undefined,
+    });
+    const layerFont = resolveTextLayerFontFamily(object, bindings);
+    const textCss = textLayerStyleToCss(textStyle, layerFont);
+    // Independent text — no plate unless the designer enables Background.
+    const fill =
+      showPlaceholder && !editing
+        ? isLowerPanelHeadlineText
+          ? "rgba(0,0,0,0.04)"
+          : "rgba(0,0,0,0.28)"
+        : textStyle.fill && textStyle.fill !== "transparent"
+          ? textStyle.fill
+          : "transparent";
     return (
       <SelectableShell
         object={object}
@@ -1639,39 +1802,54 @@ function PreviewObject({
         interactive={interactive}
         selected={selected}
         onSelect={select}
-        className="absolute overflow-hidden"
+        onDoubleClick={
+          interactive && onBeginTextEdit
+            ? () => onBeginTextEdit(object.id)
+            : undefined
+        }
+        className={
+          textStyle.auto_width || textStyle.auto_height
+            ? "absolute"
+            : "absolute overflow-hidden"
+        }
         style={{
           ...baseStyle,
-          background: showPlaceholder
-            ? isLowerPanelHeadlineText
-              ? "rgba(0,0,0,0.04)"
-              : "rgba(0,0,0,0.28)"
-            : ((object.style.fill as string | undefined) ?? "transparent"),
+          ...textLayerShellAlignCss(textStyle),
+          background: fill,
           borderRadius: Number(object.style.corner_radius ?? 0),
-          fontFamily,
-          fontSize: Number(object.style.font_size ?? defaultTextSize),
-          fontWeight: Number(object.style.font_weight ?? defaultTextWeight),
-          color: isLowerPanelHeadlineText
-            ? GNN_001_LOWER_PANEL_TEXT_COLOR
-            : String(object.style.color ?? "#fff"),
-          display: "flex",
-          alignItems:
-            object.style.vertical_alignment === "top"
-              ? "flex-start"
-              : object.style.vertical_alignment === "bottom"
-                ? "flex-end"
-                : "center",
-          padding: "8px 12px",
-          lineHeight: Number(object.style.line_height ?? 1.35),
-          letterSpacing: Number(object.style.letter_spacing ?? 0),
-          textAlign: (object.style.alignment as CanvasTextAlign) ?? "left",
-          whiteSpace: object.style.wrap ? "pre-wrap" : "nowrap",
+          width: textStyle.auto_width
+            ? "max-content"
+            : object.transform.width,
+          height: textStyle.auto_height
+            ? "max-content"
+            : object.transform.height,
+          minWidth: textStyle.auto_width ? 0 : undefined,
+          minHeight: textStyle.auto_height ? 0 : undefined,
         }}
       >
-        {showPlaceholder ? (
+        {showPlaceholder && !editing ? (
           <ReadablePlaceholder kind={kind} />
         ) : (
-          displayLabel
+          <TextLayerContent
+            text={displayLabel}
+            editing={editing}
+            style={{
+              ...textCss,
+              // Avoid React `background` shorthand wiping gradient text paint.
+              backgroundColor: "transparent",
+              backgroundImage: textStyle.gradient
+                ? textCss.backgroundImage
+                : "none",
+              width: textStyle.auto_width ? "max-content" : "100%",
+              height: textStyle.auto_height ? "auto" : "100%",
+              maxWidth: textStyle.auto_width
+                ? undefined
+                : object.transform.width,
+            }}
+            placeholder={object.name || "Text"}
+            onCommit={(next) => onCommitTextEdit?.(object.id, next)}
+            onCancel={() => onCancelTextEdit?.()}
+          />
         )}
       </SelectableShell>
     );
@@ -1734,6 +1912,10 @@ export function StoryLivePreview({
   interactive = false,
   fillParent = false,
   onBrowseMedia,
+  editingObjectId = null,
+  onBeginTextEdit,
+  onCommitTextEdit,
+  onCancelTextEdit,
 }: StoryLivePreviewProps) {
   const containerRef = useRef<HTMLDivElement>(null);
   const [fitScale, setFitScale] = useState(1);
@@ -1909,6 +2091,8 @@ export function StoryLivePreview({
           width={artboard.width}
           height={artboard.height}
           bindings={bindings}
+          clockMs={playheadMs}
+          isPlaying={isPlaying}
         />
       ) : null}
 
@@ -1987,6 +2171,10 @@ export function StoryLivePreview({
           playheadMs={playheadMs}
           motionMode={motionMode}
           lowerInfoPanel={lowerInfoPanel}
+          editingObjectId={editingObjectId}
+          onBeginTextEdit={onBeginTextEdit}
+          onCommitTextEdit={onCommitTextEdit}
+          onCancelTextEdit={onCancelTextEdit}
         />
       ))}
 
