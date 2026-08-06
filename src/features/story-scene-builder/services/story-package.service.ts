@@ -19,6 +19,7 @@ import {
 import {
   DEFAULT_MASTER_TEMPLATE_CODE,
   findMasterTemplateByCode,
+  findMasterTemplateById,
 } from "@/features/story-scene-builder/lib/find-master-template";
 import { instantiateSceneFromMaster } from "@/features/story-scene-builder/lib/instantiate-scene";
 import { storySceneBuilderDb } from "@/features/story-scene-builder/lib/scene-builder-db";
@@ -30,6 +31,7 @@ import type {
   StorySceneInstanceRow,
   StoryVoiceSegmentRow,
 } from "@/features/story-scene-builder/types/scene-builder.types";
+import type { StoryDataRecord } from "@/features/story-production/types/story-data.types";
 
 type Client = SupabaseClient;
 type Result<T> = { data: T | null; error: string | null };
@@ -195,10 +197,11 @@ export async function buildStoryScenePackage(
     storyId: string;
     userId: string;
     masterTemplateCode?: string;
+    masterTemplateId?: string;
   },
 ): Promise<Result<BuildStoryScenesResult>> {
   const db = storySceneBuilderDb(client);
-  const masterCode = input.masterTemplateCode ?? DEFAULT_MASTER_TEMPLATE_CODE;
+  let masterCode = input.masterTemplateCode ?? DEFAULT_MASTER_TEMPLATE_CODE;
 
   const { data: story, error: storyError } = await client
     .from("stories")
@@ -220,26 +223,44 @@ export async function buildStoryScenePackage(
   const composer = createSceneComposerService(client);
   await composer.ensureDefaults(story.organization_id, input.userId);
 
-  let masterResult = await findMasterTemplateByCode(
-    client,
-    story.organization_id,
-    masterCode,
-  );
+  let master: Awaited<ReturnType<typeof findMasterTemplateByCode>>["data"] =
+    null;
 
-  // Second pass: revive/reseed can race with a prior soft-delete; retry once.
-  if (!masterResult.data) {
-    await composer.ensureDefaults(story.organization_id, input.userId);
-    masterResult = await findMasterTemplateByCode(
+  if (input.masterTemplateId) {
+    const byId = await findMasterTemplateById(
+      client,
+      story.organization_id,
+      input.masterTemplateId,
+    );
+    if (!byId.data) {
+      return fail(byId.error ?? "Master Template not found");
+    }
+    master = byId.data;
+    masterCode = getScenePackageCode(master) ?? "";
+  } else {
+    let masterResult = await findMasterTemplateByCode(
       client,
       story.organization_id,
       masterCode,
     );
-  }
 
-  if (!masterResult.data) {
-    return fail(masterResult.error ?? "Master Template not found");
+    // Second pass: revive/reseed can race with a prior soft-delete; retry once.
+    if (!masterResult.data) {
+      await composer.ensureDefaults(story.organization_id, input.userId);
+      masterResult = await findMasterTemplateByCode(
+        client,
+        story.organization_id,
+        masterCode,
+      );
+    }
+
+    if (!masterResult.data) {
+      return fail(masterResult.error ?? "Master Template not found");
+    }
+    master = masterResult.data;
+    masterCode = getScenePackageCode(master) ?? masterCode;
   }
-  const master = masterResult.data;
+  const packageTemplateCode = masterCode.trim();
 
   const existing = await getStoryPackageByStoryId(client, input.storyId);
   if (existing.error) return fail(existing.error);
@@ -256,7 +277,7 @@ export async function buildStoryScenePackage(
         title: `${story.title} · Scene Package`,
         status: "building",
         master_template_id: master.id,
-        master_template_code: getScenePackageCode(master) ?? masterCode,
+        master_template_code: packageTemplateCode || null,
         created_by: input.userId,
         updated_by: input.userId,
         history: [
@@ -281,7 +302,7 @@ export async function buildStoryScenePackage(
         status: "building",
         error: null,
         master_template_id: master.id,
-        master_template_code: getScenePackageCode(master) ?? masterCode,
+        master_template_code: packageTemplateCode || null,
         updated_by: input.userId,
       })
       .eq("id", pkg.id);
@@ -435,7 +456,7 @@ export async function buildStoryScenePackage(
           // Behaviors stay Master Template defaults (cloned in scene_document)
           behaviors: [],
           metadata: {
-            master_template_code: masterCode,
+            master_template_code: packageTemplateCode || master.name,
             voice_start_ms: panel.startMs,
             voice_end_ms: panel.endMs,
             ...instanceFields.metadataExtras,
@@ -458,7 +479,7 @@ export async function buildStoryScenePackage(
       ...previousHistory,
       historyEntry("built", input.userId, {
         scene_count: scenes.length,
-        master_template_code: masterCode,
+        master_template_code: packageTemplateCode || master.name,
         voice_duration_ms: voiceDurationMs,
         voice_status: story.voice_status,
       }),
@@ -481,7 +502,7 @@ export async function buildStoryScenePackage(
           step: 2,
           segment_count: scenes.length,
           master_template_id: master.id,
-          master_template_code: masterCode,
+          master_template_code: packageTemplateCode || master.name,
           analyzed_at: new Date().toISOString(),
           voice_status: story.voice_status,
           binding_model: "story-panel-v1",
@@ -740,13 +761,7 @@ export async function syncStoryPackageFromPanels(
     return fail("No Scene Collection yet. Build scenes first.");
   }
 
-  const masterTemplateId =
-    bundle.data.package.master_template_id ||
-    bundle.data.scenes[0]?.master_template_id ||
-    "";
-  const masterChrome = masterTemplateId
-    ? await loadMasterChromeAssets(client, masterTemplateId)
-    : extractMasterChromeAssets({});
+  const chromeByTemplateId = new Map<string, MasterChromeAssets>();
   const advertisementRef = resolveAdvertisementRef(
     loaded.story as unknown as Record<string, unknown>,
   );
@@ -759,6 +774,18 @@ export async function syncStoryPackageFromPanels(
       loaded.panels[instance.sort_order] ??
       null;
     if (!panel) continue;
+
+    const templateId = instance.master_template_id?.trim() ?? "";
+    if (!chromeByTemplateId.has(templateId)) {
+      chromeByTemplateId.set(
+        templateId,
+        templateId
+          ? await loadMasterChromeAssets(client, templateId)
+          : extractMasterChromeAssets({}),
+      );
+    }
+    const masterChrome =
+      chromeByTemplateId.get(templateId) ?? extractMasterChromeAssets({});
 
     const err = await applyPanelToSceneInstance(client, {
       userId: input.userId,
@@ -856,4 +883,121 @@ export async function syncStorySceneInstanceFromPanels(
   if (err) return fail(err);
 
   return ok({ sceneId: input.sceneId });
+}
+
+/** Re-link one story scene instance to a different library master template. */
+export async function relinkStorySceneInstanceTemplate(
+  client: Client,
+  input: {
+    sceneInstanceId: string;
+    masterTemplateId: string;
+    userId: string;
+  },
+): Promise<Result<{ instance: StorySceneInstanceRow; sceneId: string }>> {
+  const db = storySceneBuilderDb(client);
+
+  const { data: instance, error: instanceError } = await db
+    .from("story_scene_instances")
+    .select("*")
+    .eq("id", input.sceneInstanceId)
+    .is("deleted_at", null)
+    .maybeSingle();
+
+  if (instanceError) return fail(instanceError.message);
+  if (!instance) return fail("Scene instance not found");
+
+  const row = instance as StorySceneInstanceRow;
+  if (row.master_template_id === input.masterTemplateId) {
+    return ok({ instance: row, sceneId: row.scene_id });
+  }
+
+  const { data: currentScene, error: sceneError } = await db
+    .from("creative_studio_motion_scenes")
+    .select("resolved_bindings, metadata")
+    .eq("id", row.scene_id)
+    .is("deleted_at", null)
+    .maybeSingle();
+
+  if (sceneError) return fail(sceneError.message);
+  if (!currentScene) return fail("Current scene clone not found");
+
+  const masterResult = await findMasterTemplateById(
+    client,
+    row.organization_id,
+    input.masterTemplateId,
+  );
+  if (!masterResult.data) {
+    return fail(masterResult.error ?? "Template not found");
+  }
+
+  const master = masterResult.data;
+  const masterCode = getScenePackageCode(master) ?? "";
+  const resolvedBindings =
+    (currentScene as { resolved_bindings?: Record<string, string> })
+      .resolved_bindings ?? {};
+  const sceneMeta = (currentScene as { metadata?: Record<string, unknown> })
+    .metadata;
+  const storyData = (sceneMeta?.story_data ?? {}) as StoryDataRecord;
+
+  const clone = await instantiateSceneFromMaster(client, {
+    master,
+    userId: input.userId,
+    name: row.headline || row.name,
+    durationMs: row.duration_ms,
+    resolvedBindings,
+    storyData,
+    storyId: row.story_id,
+    packageId: row.package_id,
+    segmentIndex: row.sort_order,
+    storyHeadline:
+      typeof row.metadata?.story_headline === "string"
+        ? row.metadata.story_headline
+        : row.headline,
+  });
+
+  if (!clone.data) {
+    return fail(clone.error ?? "Failed to clone template");
+  }
+
+  const { data: updated, error: updateError } = await db
+    .from("story_scene_instances")
+    .update({
+      master_template_id: master.id,
+      scene_id: clone.data.id,
+      updated_by: input.userId,
+      metadata: {
+        ...row.metadata,
+        master_template_code: masterCode || master.name,
+        relinked_from_scene_id: row.scene_id,
+        relinked_at: new Date().toISOString(),
+      },
+    })
+    .eq("id", row.id)
+    .select("*")
+    .single();
+
+  if (updateError || !updated) {
+    return fail(updateError?.message ?? "Failed to update scene instance");
+  }
+
+  await db
+    .from("creative_studio_motion_scenes")
+    .update({
+      deleted_at: new Date().toISOString(),
+      updated_by: input.userId,
+    })
+    .eq("id", row.scene_id);
+
+  const synced = await syncStorySceneInstanceFromPanels(client, {
+    sceneId: clone.data.id,
+    userId: input.userId,
+  });
+  if (!synced.data) {
+    return fail(synced.error ?? "Template linked but sync failed");
+  }
+
+  return ok({
+    instance: updated as StorySceneInstanceRow,
+    sceneId: clone.data.id,
+  });
 }

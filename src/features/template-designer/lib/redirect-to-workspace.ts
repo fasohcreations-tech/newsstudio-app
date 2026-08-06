@@ -24,6 +24,7 @@ const INSPECTOR_TABS: InspectorTab[] = [
   "behaviors",
   "shape",
   "bindings",
+  "mapping",
   "story",
 ];
 

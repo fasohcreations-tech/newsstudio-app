@@ -10,6 +10,10 @@ import {
 } from "@/features/scene-composer/constants/gnn-broadcast-package.constants";
 import { composerDb } from "@/features/scene-composer/lib/composer-db";
 import {
+  requireComposerUuid,
+  toComposerUuid,
+} from "@/features/scene-composer/lib/composer-ids";
+import {
   createDefaultComposerSettings,
   objectsToLayers,
   upgradeToComposerDocument,
@@ -347,7 +351,9 @@ export class SupabaseSceneComposerService {
       doc.objects.map((obj) => [obj.id, obj] as const),
     );
     const objects = [...objectsById.values()];
-    const objectIds = objects.map((obj) => obj.id);
+    const objectIds = objects
+      .map((obj) => toComposerUuid(obj.id))
+      .filter((id): id is string => Boolean(id));
 
     // Upsert first so saves succeed even before DELETE is granted (migration 000018).
     // The old delete→insert path hit duplicate pkey because RLS blocked deletes.
@@ -356,11 +362,11 @@ export class SupabaseSceneComposerService {
         .from("creative_studio_scene_objects")
         .upsert(
           objects.map((obj) => ({
-            id: obj.id,
+            id: requireComposerUuid(obj.id, "object id"),
             organization_id: organizationId,
             scene_id: sceneId,
-            parent_object_id: obj.parent_object_id ?? null,
-            component_id: obj.component_id ?? null,
+            parent_object_id: toComposerUuid(obj.parent_object_id ?? null),
+            component_id: toComposerUuid(obj.component_id ?? null),
             object_type: obj.object_type,
             name: obj.name,
             sort_order: obj.sort_order,
@@ -400,17 +406,19 @@ export class SupabaseSceneComposerService {
       doc.bindings.map((binding) => [binding.id, binding] as const),
     );
     const bindings = [...bindingsById.values()];
-    const bindingIds = bindings.map((b) => b.id);
+    const bindingIds = bindings
+      .map((b) => toComposerUuid(b.id))
+      .filter((id): id is string => Boolean(id));
 
     if (bindings.length > 0) {
       const { error: bindingsError } = await this.db()
         .from("creative_studio_scene_bindings")
         .upsert(
           bindings.map((binding) => ({
-            id: binding.id,
+            id: requireComposerUuid(binding.id, "binding id"),
             organization_id: organizationId,
             scene_id: sceneId,
-            object_id: binding.object_id ?? null,
+            object_id: toComposerUuid(binding.object_id ?? null),
             variable_key: binding.variable_key,
             binding_source: binding.binding_source,
             target_property: binding.target_property,
@@ -442,18 +450,20 @@ export class SupabaseSceneComposerService {
       doc.keyframes.map((kf) => [kf.id, kf] as const),
     );
     const keyframes = [...keyframesById.values()];
-    const keyframeIds = keyframes.map((kf) => kf.id);
+    const keyframeIds = keyframes
+      .map((kf) => toComposerUuid(kf.id))
+      .filter((id): id is string => Boolean(id));
 
     if (keyframes.length > 0) {
       const { error: keyframesError } = await this.db()
         .from("creative_studio_scene_keyframes")
         .upsert(
           keyframes.map((kf) => ({
-            id: kf.id,
+            id: requireComposerUuid(kf.id, "keyframe id"),
             organization_id: organizationId,
             scene_id: sceneId,
-            object_id: kf.object_id ?? null,
-            animation_id: kf.animation_id ?? null,
+            object_id: toComposerUuid(kf.object_id ?? null),
+            animation_id: toComposerUuid(kf.animation_id ?? null),
             property: kf.property,
             at_ms: kf.at_ms,
             value: kf.value,
@@ -493,11 +503,14 @@ export class SupabaseSceneComposerService {
           duration_ms: patch.duration_ms ?? objects[0]?.end_ms ?? 5000,
           frame_rate: patch.frame_rate ?? 30,
           markers: [],
-          tracks: objects.map((obj) => ({
-            id: `track-${obj.id}`,
-            object_id: obj.id,
-            name: obj.name,
-          })),
+          tracks: objects.map((obj) => {
+            const objectId = requireComposerUuid(obj.id, "object id");
+            return {
+              id: `track-${objectId}`,
+              object_id: objectId,
+              name: obj.name,
+            };
+          }),
         },
         { onConflict: "scene_id" },
       );

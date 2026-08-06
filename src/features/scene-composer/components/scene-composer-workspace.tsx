@@ -83,10 +83,17 @@ import {
   getMediaContainerConfig,
   isBackgroundContainerObject,
   isMediaSlideContainerObject,
+  isSmartContainerObject,
   mediaContainerResolveKey,
   mediaContainerToBackgroundStoryPatch,
   patchMediaContainerConfig,
 } from "@/features/scene-composer/lib/media-container";
+import {
+  buildLayerMappingBindings,
+  getSmartMappingConfig,
+  mappingTransitionToMediaStyle,
+  storyDataFromBindings,
+} from "@/features/scene-composer/lib/story-mapping";
 import {
   defaultTargetForAssetCategory,
   resolveMediaTargetForObject,
@@ -290,21 +297,18 @@ export function SceneComposerWorkspace({
   const selectedObjectRef = useRef(selectedObject);
   selectedObjectRef.current = selectedObject;
 
-  const containerSlideBindings = useMemo(() => {
-    const out: Record<string, string> = {};
-    for (const obj of composer.scene.composer_document.objects) {
-      if (!isMediaSlideContainerObject(obj)) continue;
-      const cfg = getMediaContainerConfig(obj, storyForm.bindings);
-      if (cfg.slides.trim()) {
-        out[mediaContainerResolveKey(obj.id)] = cfg.slides;
-      }
-    }
-    return out;
+  const layerMappingBindings = useMemo(() => {
+    const story = storyDataFromBindings(storyForm.bindings);
+    return buildLayerMappingBindings(
+      composer.scene.composer_document.objects,
+      story,
+      { bindings: storyForm.bindings },
+    );
   }, [composer.scene.composer_document.objects, storyForm.bindings]);
 
   const previewBindings = useResolvedStoryBindings({
     ...storyForm.bindings,
-    ...containerSlideBindings,
+    ...layerMappingBindings,
   });
 
   useEffect(() => {
@@ -611,17 +615,38 @@ export function SceneComposerWorkspace({
       if (!object || !isMediaSlideContainerObject(object)) {
         return false;
       }
+      if (isSmartContainerObject(object)) {
+        const mapping = getSmartMappingConfig(object);
+        if (mapping.mappingMode !== "manual") {
+          toast.message("Switch Mapping Mode to Manual to browse slides.");
+          return true;
+        }
+      }
       const cfg = getMediaContainerConfig(object, storyForm.bindings);
       const incoming = url.includes(",")
         ? url.split(",").map((part) => part.trim()).filter(Boolean).at(-1) ??
           url
         : url;
       const nextSlides = appendMediaContainerSlide(cfg.slides, incoming);
-      const patched = patchMediaContainerConfig(
+      let patched = patchMediaContainerConfig(
         object,
         { slides: nextSlides },
         storyForm.bindings,
       );
+      if (isSmartContainerObject(object)) {
+        const mapping = getSmartMappingConfig(object);
+        patched = patchMediaContainerConfig(
+          patched,
+          {
+            transitionStyle: mappingTransitionToMediaStyle(mapping.transition),
+            intervalMs:
+              mapping.durationMode === "manual"
+                ? mapping.durationMs
+                : undefined,
+          },
+          storyForm.bindings,
+        );
+      }
       patchObject(object.id, { content: patched.content });
       if (isBackgroundContainerObject(object)) {
         storyForm.patchFields(
@@ -1173,6 +1198,10 @@ export function SceneComposerWorkspace({
             <StoryAssetsPanel
               onApplyMedia={(field, url) => {
                 if (applyMediaToSelection(url)) {
+                  setMediaBrowserOpen(false);
+                  return;
+                }
+                if (field === "main_image" && activeMediaTarget?.bindingKey === "__smart_container__") {
                   setMediaBrowserOpen(false);
                   return;
                 }

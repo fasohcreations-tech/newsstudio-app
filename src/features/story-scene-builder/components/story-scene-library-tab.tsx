@@ -1,11 +1,12 @@
 "use client";
 
-import { useCallback, useEffect, useState, useTransition } from "react";
+import { useCallback, useEffect, useMemo, useState, useTransition } from "react";
 import Link from "next/link";
 import {
   ChevronDown,
   ChevronRight,
   Clapperboard,
+  ExternalLink,
   Loader2,
   RefreshCw,
   Sparkles,
@@ -15,12 +16,25 @@ import { toast } from "sonner";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import { Label } from "@/components/ui/label";
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select";
 import {
   buildStoryScenesAction,
   getStoryPackageAction,
+  listStoryMasterTemplatesAction,
+  relinkStorySceneInstanceTemplateAction,
   syncStoryScenesFromPanelsAction,
 } from "@/features/story-scene-builder/actions/scene-builder.actions";
-import { DEFAULT_MASTER_TEMPLATE_CODE } from "@/features/story-scene-builder/lib/find-master-template";
+import {
+  DEFAULT_MASTER_TEMPLATE_CODE,
+  type StoryMasterTemplateOption,
+} from "@/features/story-scene-builder/lib/find-master-template";
 import { buildMotionSceneEditorHref } from "@/features/motion-scene-engine/lib/motion-scene-navigation";
 import type {
   StoryPackageBundle,
@@ -53,6 +67,35 @@ function formatMs(ms: number | null | undefined): string {
   return `${m}:${String(s).padStart(2, "0")}`;
 }
 
+function templateLabel(template: StoryMasterTemplateOption): string {
+  const isUuidLike = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(
+    template.name.trim(),
+  );
+  const displayName = isUuidLike
+    ? `Template ${template.id.slice(0, 8)}`
+    : template.name;
+  const code = template.packageCode?.trim();
+  return code ? `${displayName} · ${code}` : displayName;
+}
+
+function templateFallbackLabelById(id: string): string {
+  return `Template ${id.slice(0, 8)}`;
+}
+
+function pickDefaultTemplateId(
+  templates: StoryMasterTemplateOption[],
+  preferredId?: string | null,
+  preferredCode?: string | null,
+): string {
+  if (preferredId && templates.some((t) => t.id === preferredId)) {
+    return preferredId;
+  }
+  const code = preferredCode ?? DEFAULT_MASTER_TEMPLATE_CODE;
+  const byCode = templates.find((t) => t.packageCode === code);
+  if (byCode) return byCode.id;
+  return templates[0]?.id ?? "";
+}
+
 export function StorySceneLibraryTab({
   story,
   disabled,
@@ -60,22 +103,57 @@ export function StorySceneLibraryTab({
   onOpenScript,
 }: StorySceneLibraryTabProps) {
   const [bundle, setBundle] = useState<StoryPackageBundle | null>(null);
+  const [templates, setTemplates] = useState<StoryMasterTemplateOption[]>([]);
+  const [selectedTemplateId, setSelectedTemplateId] = useState("");
   const [loading, setLoading] = useState(true);
   const [expanded, setExpanded] = useState(true);
+  const [relinkingId, setRelinkingId] = useState<string | null>(null);
   const [pending, startTransition] = useTransition();
 
   const approved = Boolean(story.approved_script?.trim());
   const voiceStatus = (story.voice_status ?? "none") as StoryVoiceStatus;
   const voiceReady = voiceStatus === "ready";
 
+  const templateById = useMemo(
+    () => new Map(templates.map((t) => [t.id, t])),
+    [templates],
+  );
+
+  const selectedTemplate = selectedTemplateId
+    ? templateById.get(selectedTemplateId)
+    : undefined;
+
   const refresh = useCallback(async () => {
     setLoading(true);
-    const result = await getStoryPackageAction(story.id);
-    if (!result.success) {
-      toast.error(result.error);
+    const [packageResult, templatesResult] = await Promise.all([
+      getStoryPackageAction(story.id),
+      listStoryMasterTemplatesAction(story.id),
+    ]);
+
+    if (!packageResult.success) {
+      toast.error(packageResult.error);
       setBundle(null);
     } else {
-      setBundle(result.data);
+      setBundle(packageResult.data);
+    }
+
+    if (!templatesResult.success) {
+      toast.error(templatesResult.error);
+      setTemplates([]);
+    } else {
+      setTemplates(templatesResult.data);
+      setSelectedTemplateId((current) => {
+        if (current && templatesResult.data.some((t) => t.id === current)) {
+          return current;
+        }
+        return pickDefaultTemplateId(
+          templatesResult.data,
+          packageResult.success ? packageResult.data?.package.master_template_id : null,
+          packageResult.success
+            ? packageResult.data?.package.master_template_code
+            : null,
+        );
+      });
     }
     setLoading(false);
   }, [story.id]);
@@ -85,10 +163,15 @@ export function StorySceneLibraryTab({
   }, [refresh]);
 
   const build = () => {
+    if (!selectedTemplateId) {
+      toast.error("Choose a Master Template from the library first.");
+      return;
+    }
     startTransition(async () => {
       const result = await buildStoryScenesAction({
         storyId: story.id,
-        masterTemplateCode: DEFAULT_MASTER_TEMPLATE_CODE,
+        masterTemplateId: selectedTemplateId,
+        masterTemplateCode: selectedTemplate?.packageCode ?? undefined,
       });
       if (!result.success) {
         toast.error(result.error);
@@ -100,8 +183,12 @@ export function StorySceneLibraryTab({
         scenes: result.data.scenes,
       });
       setExpanded(true);
+      const label =
+        selectedTemplate?.packageCode ??
+        result.data.package.master_template_code ??
+        "template";
       toast.success(
-        `Built ${result.data.scenes.length} scene instance${result.data.scenes.length === 1 ? "" : "s"} from ${DEFAULT_MASTER_TEMPLATE_CODE}`,
+        `Built ${result.data.scenes.length} scene instance${result.data.scenes.length === 1 ? "" : "s"} from ${label}`,
       );
     });
   };
@@ -120,18 +207,38 @@ export function StorySceneLibraryTab({
     });
   };
 
+  const relinkScene = (sceneInstanceId: string, masterTemplateId: string) => {
+    setRelinkingId(sceneInstanceId);
+    startTransition(async () => {
+      const result = await relinkStorySceneInstanceTemplateAction({
+        sceneInstanceId,
+        masterTemplateId,
+      });
+      setRelinkingId(null);
+      if (!result.success) {
+        toast.error(result.error);
+        return;
+      }
+      await refresh();
+      const label = templateById.get(masterTemplateId)?.name ?? "template";
+      toast.success(`Scene linked to ${label}`);
+    });
+  };
+
   const pkg = bundle?.package ?? null;
   const scenes = bundle?.scenes ?? [];
+  const pkgTemplate =
+    (pkg?.master_template_id && templateById.get(pkg.master_template_id)) ||
+    null;
 
   return (
     <div className="mx-auto flex w-full max-w-4xl flex-col gap-4">
       <div className="space-y-1">
         <h2 className="text-lg font-semibold tracking-tight">Scene Library</h2>
         <p className="text-sm text-muted-foreground">
-          One Scene Instance per Story Panel. Panel Subheadline becomes the
-          on-screen headline; panel media fills the Main Media Container. Story
-          Headline stays story-level identity — Master Templates are never
-          modified.
+          Link each Story Panel to an editable scene clone from a Master
+          Template in the library. Panel Subheadline becomes the on-screen
+          headline; panel media fills the Main Media Container.
         </p>
       </div>
 
@@ -142,38 +249,79 @@ export function StorySceneLibraryTab({
             Prerequisites
           </CardTitle>
         </CardHeader>
-        <CardContent className="flex flex-wrap items-center gap-2">
-          <Badge variant={approved ? "default" : "outline"}>
-            {approved ? "Script approved" : "Script pending"}
-          </Badge>
-          <Badge variant={voiceReady ? "default" : "secondary"}>
-            Voice · {voiceStatus}
-          </Badge>
-          <Badge variant="outline">
-            Master · {DEFAULT_MASTER_TEMPLATE_CODE}
-          </Badge>
-          {!approved ? (
-            <Button
-              type="button"
-              size="sm"
-              variant="ghost"
-              className="h-7"
-              onClick={onOpenScript}
-            >
-              Open script
-            </Button>
-          ) : null}
-          {approved && !voiceReady ? (
-            <Button
-              type="button"
-              size="sm"
-              variant="ghost"
-              className="h-7"
-              onClick={onOpenVoice}
-            >
-              Generate voice
-            </Button>
-          ) : null}
+        <CardContent className="space-y-4">
+          <div className="flex flex-wrap items-center gap-2">
+            <Badge variant={approved ? "default" : "outline"}>
+              {approved ? "Script approved" : "Script pending"}
+            </Badge>
+            <Badge variant={voiceReady ? "default" : "secondary"}>
+              Voice · {voiceStatus}
+            </Badge>
+            {!approved ? (
+              <Button
+                type="button"
+                size="sm"
+                variant="ghost"
+                className="h-7"
+                onClick={onOpenScript}
+              >
+                Open script
+              </Button>
+            ) : null}
+            {approved && !voiceReady ? (
+              <Button
+                type="button"
+                size="sm"
+                variant="ghost"
+                className="h-7"
+                onClick={onOpenVoice}
+              >
+                Generate voice
+              </Button>
+            ) : null}
+          </div>
+
+          <div className="space-y-1.5">
+            <Label className="text-xs text-muted-foreground">
+              Master Template (library)
+            </Label>
+            {templates.length === 0 ? (
+              <p className="text-sm text-muted-foreground">
+                {loading
+                  ? "Loading templates…"
+                  : "No templates in the library yet. Open Creative Studio → Scenes to seed masters."}
+              </p>
+            ) : (
+              <Select
+                value={selectedTemplateId}
+                onValueChange={setSelectedTemplateId}
+                disabled={disabled || pending || loading}
+              >
+                <SelectTrigger className="w-full max-w-md">
+                  <SelectValue placeholder="Choose a template" />
+                </SelectTrigger>
+                <SelectContent>
+                  {templates.map((template) => (
+                    <SelectItem key={template.id} value={template.id}>
+                      {templateLabel(template)}
+                    </SelectItem>
+                  ))}
+                  {selectedTemplateId &&
+                  !templates.some((template) => template.id === selectedTemplateId) ? (
+                    <SelectItem value={selectedTemplateId}>
+                      {templateFallbackLabelById(selectedTemplateId)}
+                    </SelectItem>
+                  ) : null}
+                </SelectContent>
+              </Select>
+            )}
+            {selectedTemplate ? (
+              <p className="text-xs text-muted-foreground">
+                {selectedTemplate.description?.trim() ||
+                  `${selectedTemplate.aspectFormat} · ${formatMs(selectedTemplate.durationMs)} default`}
+              </p>
+            ) : null}
+          </div>
         </CardContent>
       </Card>
 
@@ -181,7 +329,9 @@ export function StorySceneLibraryTab({
         <Button
           type="button"
           onClick={build}
-          disabled={disabled || !approved || pending}
+          disabled={
+            disabled || !approved || pending || !selectedTemplateId || loading
+          }
         >
           {pending ? (
             <Loader2 className="size-4 animate-spin" />
@@ -253,8 +403,9 @@ export function StorySceneLibraryTab({
           <CardContent className="space-y-2 py-10 text-center">
             <p className="font-medium">No Story Package yet</p>
             <p className="mx-auto max-w-md text-sm text-muted-foreground">
-              After the script is approved (and voice is generated), build a Scene
-              Collection. Each scene is an editable clone of the Master Template.
+              After the script is approved, pick a Master Template and build a
+              Scene Collection. Each scene is an editable clone — the library
+              master is never modified.
             </p>
           </CardContent>
         </Card>
@@ -280,7 +431,9 @@ export function StorySceneLibraryTab({
                   {PACKAGE_STATUS_LABELS[pkg.status]}
                 </Badge>
                 <Badge variant="outline" className="text-[10px]">
-                  {pkg.master_template_code ?? DEFAULT_MASTER_TEMPLATE_CODE}
+                  {pkgTemplate
+                    ? templateLabel(pkgTemplate)
+                    : pkg.master_template_code ?? DEFAULT_MASTER_TEMPLATE_CODE}
                 </Badge>
               </div>
               <p className="text-xs text-muted-foreground">
@@ -301,38 +454,108 @@ export function StorySceneLibraryTab({
                 scenes.map((scene, index) => {
                   const href = buildMotionSceneEditorHref(scene.scene_id);
                   const order = String(index + 1).padStart(2, "0");
+                  const linkedTemplate =
+                    templateById.get(scene.master_template_id) ?? null;
+                  const isRelinking = relinkingId === scene.id;
+
                   return (
-                    <Link
+                    <div
                       key={scene.id}
-                      href={href}
-                      className="flex items-center gap-3 rounded-md border border-transparent px-3 py-2.5 transition-colors hover:border-border hover:bg-muted/50"
+                      className="flex flex-col gap-2 rounded-md border border-transparent px-3 py-2.5 transition-colors hover:border-border hover:bg-muted/50 sm:flex-row sm:items-center"
                     >
-                      <span className="w-16 shrink-0 font-mono text-xs text-muted-foreground">
-                        Scene {order}
-                      </span>
-                      <div className="min-w-0 flex-1">
-                        <p className="truncate text-sm font-medium">
-                          {scene.headline || scene.name || `Scene ${order}`}
-                        </p>
-                        <p className="truncate text-xs text-muted-foreground">
-                          {typeof scene.metadata?.story_headline === "string"
-                            ? `Story · ${scene.metadata.story_headline}`
-                            : scene.subheadline || "—"}
-                        </p>
+                      <div className="flex min-w-0 flex-1 items-start gap-3">
+                        <span className="w-16 shrink-0 font-mono text-xs text-muted-foreground">
+                          Scene {order}
+                        </span>
+                        <div className="min-w-0 flex-1">
+                          <p className="truncate text-sm font-medium">
+                            {scene.headline || scene.name || `Scene ${order}`}
+                          </p>
+                          <p className="truncate text-xs text-muted-foreground">
+                            {typeof scene.metadata?.story_headline === "string"
+                              ? `Story · ${scene.metadata.story_headline}`
+                              : scene.subheadline || "—"}
+                          </p>
+                        </div>
+                        <span className="shrink-0 text-xs text-muted-foreground">
+                          {formatMs(scene.duration_ms)}
+                        </span>
                       </div>
-                      <span className="shrink-0 text-xs text-muted-foreground">
-                        {formatMs(scene.duration_ms)}
-                      </span>
-                      <Badge variant="outline" className="shrink-0 text-[10px]">
-                        Edit instance
-                      </Badge>
-                    </Link>
+
+                      <div className="flex flex-wrap items-center gap-2 sm:justify-end">
+                        {templates.length > 0 ? (
+                          <Select
+                            value={scene.master_template_id}
+                            onValueChange={(value) =>
+                              relinkScene(scene.id, value)
+                            }
+                            disabled={
+                              disabled || pending || isRelinking || loading
+                            }
+                          >
+                            <SelectTrigger className="h-8 w-[min(100%,14rem)] text-xs">
+                              {isRelinking ? (
+                                <Loader2 className="size-3 animate-spin" />
+                              ) : (
+                                <SelectValue
+                                  placeholder={
+                                    linkedTemplate
+                                      ? templateLabel(linkedTemplate)
+                                      : "Link template"
+                                  }
+                                />
+                              )}
+                            </SelectTrigger>
+                            <SelectContent>
+                              {templates.map((template) => (
+                                <SelectItem
+                                  key={template.id}
+                                  value={template.id}
+                                >
+                                  {templateLabel(template)}
+                                </SelectItem>
+                              ))}
+                              {!templates.some(
+                                (template) =>
+                                  template.id === scene.master_template_id,
+                              ) ? (
+                                <SelectItem value={scene.master_template_id}>
+                                  {templateFallbackLabelById(
+                                    scene.master_template_id,
+                                  )}
+                                </SelectItem>
+                              ) : null}
+                            </SelectContent>
+                          </Select>
+                        ) : (
+                          <Badge variant="outline" className="text-[10px]">
+                            {String(
+                              scene.metadata?.master_template_code ??
+                                pkg.master_template_code ??
+                                "—",
+                            )}
+                          </Badge>
+                        )}
+                        <Button
+                          type="button"
+                          variant="outline"
+                          size="sm"
+                          className="h-8 text-xs"
+                          nativeButton={false}
+                          render={<Link href={href} />}
+                        >
+                          Edit
+                          <ExternalLink className="size-3" />
+                        </Button>
+                      </div>
+                    </div>
                   );
                 })
               )}
               <p className="pt-2 text-[11px] text-muted-foreground">
-                Selecting a scene opens Scene Composer for that instance only.
-                The Master Template is never modified.
+                Change a scene&apos;s template to re-clone from another library
+                master (panel data is preserved). Edit opens Scene Composer for
+                that instance only.
               </p>
             </CardContent>
           ) : null}

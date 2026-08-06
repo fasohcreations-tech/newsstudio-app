@@ -7,14 +7,20 @@ import { requireAuth } from "@/features/auth/guards/require-auth";
 import { createClient } from "@/shared/lib/supabase/server";
 import { getCurrentProfile } from "@/features/profile/services/profile.service";
 import { resolveActiveMembership } from "@/features/organization/services/resolve-active-membership";
+import { createSceneComposerService } from "@/features/scene-composer/services/scene-composer.service.impl";
 import { DEFAULT_MASTER_TEMPLATE_CODE } from "@/features/story-scene-builder/lib/find-master-template";
 import {
   buildStoryScenePackage,
   getStoryPackageByStoryId,
   listStoryPackagesForOrg,
+  relinkStorySceneInstanceTemplate,
   syncStoryPackageFromPanels,
   syncStorySceneInstanceFromPanels,
 } from "@/features/story-scene-builder/services/story-package.service";
+import {
+  listMasterTemplatesForOrg,
+  type StoryMasterTemplateOption,
+} from "@/features/story-scene-builder/lib/find-master-template";
 import type {
   BuildStoryScenesResult,
   StoryPackageBundle,
@@ -76,6 +82,12 @@ async function requireStoryContext(storyId: string) {
 const buildSchema = z.object({
   storyId: z.string().uuid(),
   masterTemplateCode: z.string().trim().min(1).max(40).optional(),
+  masterTemplateId: z.string().uuid().optional(),
+});
+
+const relinkSchema = z.object({
+  sceneInstanceId: z.string().uuid(),
+  masterTemplateId: z.string().uuid(),
 });
 
 export async function buildStoryScenesAction(
@@ -99,6 +111,7 @@ export async function buildStoryScenesAction(
     userId: ctx.user.id,
     masterTemplateCode:
       parsed.data.masterTemplateCode ?? DEFAULT_MASTER_TEMPLATE_CODE,
+    masterTemplateId: parsed.data.masterTemplateId,
   });
 
   if (!result.data) {
@@ -214,4 +227,95 @@ export async function listOrgStoryPackagesAction(): Promise<
     return { success: false, error: result.error };
   }
   return { success: true, data: result.data ?? [] };
+}
+
+export async function listStoryMasterTemplatesAction(
+  storyId: string,
+): Promise<StorySceneBuilderActionResult<StoryMasterTemplateOption[]>> {
+  const ctx = await requireStoryContext(storyId);
+  if (!ctx.membership) {
+    return { success: false, error: ctx.error ?? "Unauthorized" };
+  }
+
+  const composer = createSceneComposerService(ctx.supabase);
+  await composer.ensureDefaults(
+    ctx.membership.organization.id,
+    ctx.user.id,
+  );
+
+  const bundle = await getStoryPackageByStoryId(ctx.supabase, storyId);
+  const includeIds = bundle.data
+    ? [
+        bundle.data.package.master_template_id ?? "",
+        ...bundle.data.scenes.map((scene) => scene.master_template_id ?? ""),
+      ].filter(Boolean)
+    : [];
+
+  const result = await listMasterTemplatesForOrg(
+    ctx.supabase,
+    ctx.membership.organization.id,
+    includeIds,
+  );
+  if (result.error) {
+    return { success: false, error: result.error };
+  }
+  return { success: true, data: result.data };
+}
+
+export async function relinkStorySceneInstanceTemplateAction(
+  raw: z.infer<typeof relinkSchema>,
+): Promise<
+  StorySceneBuilderActionResult<{
+    sceneInstanceId: string;
+    sceneId: string;
+    masterTemplateId: string;
+  }>
+> {
+  const parsed = relinkSchema.safeParse(raw);
+  if (!parsed.success) {
+    return {
+      success: false,
+      error: parsed.error.issues[0]?.message ?? "Invalid input",
+    };
+  }
+
+  const supabase = await createClient();
+  const { data: instanceRow, error: instanceError } = await supabase
+    .from("story_scene_instances")
+    .select("story_id")
+    .eq("id", parsed.data.sceneInstanceId)
+    .is("deleted_at", null)
+    .maybeSingle();
+
+  if (instanceError || !instanceRow?.story_id) {
+    return { success: false, error: "Scene instance not found" };
+  }
+
+  const ctx = await requireStoryContext(instanceRow.story_id);
+  if (!ctx.membership) {
+    return { success: false, error: ctx.error ?? "Unauthorized" };
+  }
+
+  const result = await relinkStorySceneInstanceTemplate(ctx.supabase, {
+    sceneInstanceId: parsed.data.sceneInstanceId,
+    masterTemplateId: parsed.data.masterTemplateId,
+    userId: ctx.user.id,
+  });
+
+  if (!result.data) {
+    return { success: false, error: result.error ?? "Relink failed" };
+  }
+
+  revalidatePath(`/newsroom/stories/${instanceRow.story_id}`);
+  revalidatePath("/creative-studio/scenes");
+  revalidatePath(`/creative-studio/scenes/${result.data.sceneId}`);
+
+  return {
+    success: true,
+    data: {
+      sceneInstanceId: parsed.data.sceneInstanceId,
+      sceneId: result.data.sceneId,
+      masterTemplateId: parsed.data.masterTemplateId,
+    },
+  };
 }

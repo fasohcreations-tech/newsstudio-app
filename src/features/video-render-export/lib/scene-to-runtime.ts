@@ -22,6 +22,18 @@ import {
   patchGnn001LowerPanelObjects,
 } from "@/features/scene-composer/lib/gnn-001-lower-panel.styles";
 import { getShapeConfig } from "@/features/scene-composer/lib/shape-composer";
+import {
+  isSmartContainerObject,
+  mediaContainerResolveKey,
+  parseMediaContainerSlides,
+} from "@/features/scene-composer/lib/media-container";
+import {
+  buildLayerMappingBindings,
+  resolveMappingIntervalMs,
+  resolveSmartContainerMapping,
+  storyDataFromBindings,
+  storyDataFromComposerScene,
+} from "@/features/scene-composer/lib/story-mapping";
 import { resolveTextLayerStyle } from "@/features/scene-composer/lib/text-layer";
 import {
   resolveStoryMalayalamFont,
@@ -363,6 +375,36 @@ function optionalInfoPlaylist(
     );
 }
 
+/**
+ * Smart Container pages from Story Mapping Engine — same slides Preview shows.
+ * Prefer already-resolved `__mc_*` URLs in bindings when present.
+ */
+function smartContainerPlaylist(
+  obj: SceneObject,
+  scene: ComposerScene,
+  bindings: Record<string, string>,
+): { playlist: string[]; intervalMs: number } {
+  const key = mediaContainerResolveKey(obj.id);
+  const fromBinding = bindings[key];
+  if (fromBinding?.trim()) {
+    return {
+      playlist: parseMediaContainerSlides(fromBinding, {
+        includePendingLibraryRefs: true,
+      }),
+      intervalMs: resolveMappingIntervalMs(obj, bindings),
+    };
+  }
+  const story = storyDataFromComposerScene(scene, bindings);
+  const resolved = resolveSmartContainerMapping(obj, story, { bindings });
+  const fromResolved = parseMediaContainerSlides(resolved.slidesRaw, {
+    includePendingLibraryRefs: true,
+  });
+  return {
+    playlist: fromResolved,
+    intervalMs: resolveMappingIntervalMs(obj, bindings),
+  };
+}
+
 /** Frame/mask kinds show media through them — stroke/rim only, never a solid fill. */
 const RIM_ONLY_SHAPE_KINDS = new Set([
   "video_frame",
@@ -522,6 +564,12 @@ export function composerSceneToRuntime(
     ...(patched.resolved_bindings ?? {}),
     ...(opts?.bindings ?? {}),
   };
+  // Inject Mapping Engine pages so Preview/Export share synthetic resolve keys.
+  const storyForMapping = storyDataFromBindings(bindings);
+  const mappingBindings = buildLayerMappingBindings(objects, storyForMapping, {
+    bindings,
+  });
+  Object.assign(bindings, mappingBindings);
   const storyFont = resolveStoryMalayalamFont(bindings);
   const storyFontFamily = malayalamFamilyStack(storyFont.family);
   const primaryColor = asString(bindings.primary_color) || "#1D4ED8";
@@ -535,9 +583,19 @@ export function composerSceneToRuntime(
     const media = mediaUrlOf(obj, bindings);
     const tr = obj.transform;
     const kind = kindOf(obj, region);
-    const playlist = isOptionalInfoRegion(region)
+    const optionalPlaylist = isOptionalInfoRegion(region)
       ? optionalInfoPlaylist(region, bindings)
       : [];
+    const smart =
+      optionalPlaylist.length === 0 && isSmartContainerObject(obj)
+        ? smartContainerPlaylist(obj, patched, bindings)
+        : null;
+    const playlist = optionalPlaylist.length
+      ? optionalPlaylist
+      : (smart?.playlist ?? []);
+    const containerIntervalMs =
+      smart?.intervalMs ??
+      (playlist.length > 0 ? slideIntervalMs : null);
 
     const isTextual =
       kind === "text" ||
@@ -651,8 +709,8 @@ export function composerSceneToRuntime(
       mediaUrl: playlist.length > 0 ? playlist[0]! : media.url,
       mediaKind: playlist.length > 0 ? "image" : media.kind,
       mediaPlaylist: playlist.length > 0 ? playlist : null,
-      slideIntervalMs: playlist.length > 0 ? slideIntervalMs : null,
-      objectFit: "cover",
+      slideIntervalMs: playlist.length > 0 ? containerIntervalMs : null,
+      objectFit: isSmartContainerObject(obj) ? "contain" : "cover",
       shape,
       regionKey: region,
       metadata: {

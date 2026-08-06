@@ -69,6 +69,7 @@ export * from "@/features/scene-composer/lib/motion-presets";
 export * from "@/features/scene-composer/lib/broadcast-effects";
 export * from "@/features/scene-composer/lib/edge-sweep";
 export * from "@/features/scene-composer/lib/shape-composer";
+export * from "@/features/scene-composer/lib/story-mapping";
 export {
   buildGnnBroadcastSceneDrafts,
   GNN_MASTER_SCENES,

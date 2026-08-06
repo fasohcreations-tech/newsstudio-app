@@ -19,14 +19,11 @@ import {
 import {
   getShapeConfig,
   resolveObjectShapeOutline,
-  sampleShapePerimeter,
-} from "@/features/scene-composer/lib/shape-composer";
-import { sampleLayerMotion } from "@/features/scene-composer/lib/motion-animation";
-import {
-  getShapeConfig,
   sampleShapeBehaviors,
+  sampleShapePerimeter,
   sampleShapeReveal,
 } from "@/features/scene-composer/lib/shape-composer";
+import { sampleLayerMotion } from "@/features/scene-composer/lib/motion-animation";
 import type { ComposerScene } from "@/features/scene-composer/types/scene-composer.types";
 import { resolveStoryBindingRefs } from "@/features/story-production/lib/resolve-story-binding-refs";
 import { extendComposerSceneForDuration } from "@/features/story-scene-builder/lib/extend-scene-duration";

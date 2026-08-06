@@ -61,6 +61,7 @@ export type LayerKind =
   | "mask"
   | "component"
   | "smart_container"
+  | "slide_smart_container"
   // Generators
   | "gradient"
   | "noise"
@@ -145,6 +146,12 @@ export const LAYER_MENU_CATALOG: LayerMenuItem[] = [
   { kind: "mask", label: "Mask", category: "containers" },
   { kind: "component", label: "Component", category: "containers" },
   { kind: "smart_container", label: "Smart Container", category: "containers" },
+  {
+    kind: "slide_smart_container",
+    label: "Slide Smart Container",
+    category: "containers",
+    description: "Unlimited internal slides mapped from Story assets",
+  },
   // Generators
   { kind: "gradient", label: "Gradient", category: "generators" },
   { kind: "noise", label: "Noise", category: "generators" },
@@ -196,6 +203,7 @@ export const LAYER_KIND_TO_OBJECT_TYPE: Record<LayerKind, SceneObjectType> = {
   mask: "mask",
   component: "component",
   smart_container: "group",
+  slide_smart_container: "group",
   gradient: "gradient",
   noise: "rectangle",
   background: "rectangle",

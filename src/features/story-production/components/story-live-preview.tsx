@@ -52,6 +52,13 @@ import {
   mediaContainerResolveKey,
   parseMediaContainerSlides,
 } from "@/features/scene-composer/lib/media-container";
+import {
+  getSmartMappingConfig,
+  mappingTransitionToMediaStyle,
+  resolveMappingIntervalMs,
+  resolveSmartContainerMapping,
+  storyDataFromBindings,
+} from "@/features/scene-composer/lib/story-mapping";
 import { sampleLayerMotion } from "@/features/scene-composer/lib/motion-animation";
 import {
   findLowerInfoPanelObject,
@@ -1071,6 +1078,76 @@ function PreviewObject({
     if (regionKey !== "clock") return null;
   }
 
+  // Smart / Slide Smart Containers — before shape replacement so media always paints.
+  if (isSmartContainerObject(object)) {
+    const config = getMediaContainerConfig(object, bindings);
+    const mapping = getSmartMappingConfig(object);
+    const { slides: _ignored, ...baseControls } = config;
+    const controls = {
+      ...baseControls,
+      transitionStyle: mappingTransitionToMediaStyle(mapping.transition),
+      intervalMs: resolveMappingIntervalMs(object, bindings),
+    };
+    const mappedKey = mediaContainerResolveKey(object.id);
+    const slidesRaw =
+      bindings[mappedKey]?.trim() ||
+      resolveSmartContainerMapping(
+        object,
+        storyDataFromBindings(bindings),
+        { bindings },
+      ).slidesRaw;
+    const slides = parseMediaContainerSlides(slidesRaw);
+    const emptyLabel =
+      mapping.containerName ||
+      (object.name === "Slide Smart Container"
+        ? "Slide Smart Container"
+        : "Smart Container");
+    return (
+      <SelectableShell
+        object={object}
+        lightSweepCoverage={lightSweepCoverage}
+        interactive={interactive}
+        selected={selected}
+        onSelect={select}
+        className="absolute overflow-hidden"
+        style={withLayerMotion(
+          {
+            left: object.transform.x,
+            top: object.transform.y,
+            width: object.transform.width,
+            height: object.transform.height,
+            zIndex: 4,
+            background: slides.length
+              ? "transparent"
+              : "rgba(15, 23, 42, 0.55)",
+            border: selected
+              ? "1px solid rgba(56, 189, 248, 0.65)"
+              : "1px solid rgba(255,255,255,0.18)",
+          },
+          object,
+          playheadMs,
+          motionMode,
+        )}
+      >
+        <MediaSlideContainerView
+          width={object.transform.width}
+          height={object.transform.height}
+          slides={slides}
+          controls={controls}
+          clockMs={Math.max(0, playheadMs - object.start_ms)}
+          isPlaying={motionMode === "playback"}
+          emptyLabel={emptyLabel}
+          onBrowseMedia={
+            mapping.mappingMode === "manual" && onBrowseMedia
+              ? () => onBrowseMedia(object)
+              : undefined
+          }
+          dataLayer="smart_media_container"
+        />
+      </SelectableShell>
+    );
+  }
+
   // Shape Composer — when enabled, drive the live preview for this layer.
   if (shouldRenderAsShape(object)) {
     return (
@@ -1210,56 +1287,6 @@ function PreviewObject({
           onBrowseMedia={
             onBrowseMedia ? () => onBrowseMedia(object) : undefined
           }
-        />
-      </SelectableShell>
-    );
-  }
-
-  if (isSmartContainerObject(object)) {
-    const config = getMediaContainerConfig(object, bindings);
-    const { slides: _ignored, ...controls } = config;
-    const slides = parseMediaContainerSlides(
-      bindings[mediaContainerResolveKey(object.id)] ?? config.slides,
-    );
-    return (
-      <SelectableShell
-        object={object}
-        lightSweepCoverage={lightSweepCoverage}
-        interactive={interactive}
-        selected={selected}
-        onSelect={select}
-        className="absolute overflow-hidden"
-        style={withLayerMotion(
-          {
-            left: object.transform.x,
-            top: object.transform.y,
-            width: object.transform.width,
-            height: object.transform.height,
-            zIndex: 4,
-            background: slides.length
-              ? "transparent"
-              : "rgba(15, 23, 42, 0.55)",
-            border: selected
-              ? "1px solid rgba(56, 189, 248, 0.65)"
-              : "1px solid rgba(255,255,255,0.18)",
-          },
-          object,
-          playheadMs,
-          motionMode,
-        )}
-      >
-        <MediaSlideContainerView
-          width={object.transform.width}
-          height={object.transform.height}
-          slides={slides}
-          controls={controls}
-          clockMs={Math.max(0, playheadMs - object.start_ms)}
-          isPlaying={motionMode === "playback"}
-          emptyLabel="Smart Container"
-          onBrowseMedia={
-            onBrowseMedia ? () => onBrowseMedia(object) : undefined
-          }
-          dataLayer="smart_media_container"
         />
       </SelectableShell>
     );

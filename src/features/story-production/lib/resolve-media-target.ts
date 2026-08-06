@@ -3,6 +3,7 @@
  */
 
 import { GNN_001_MAIN_VIDEO_CONTAINER_SLUG } from "@/features/scene-composer/lib/gnn-001-main-video.constants";
+import { isSmartContainerObject } from "@/features/scene-composer/lib/media-container";
 import { REGION_STORY_BINDINGS } from "@/features/story-production/lib/story-binding-engine";
 import type { SceneObject } from "@/features/scene-composer/types/scene-composer.types";
 import type { StoryDataRecord } from "@/features/story-production/types/story-data.types";
@@ -31,6 +32,14 @@ const FIELD_TARGETS: Record<string, StoryMediaTarget> = {
     label: "Background Slides",
     kind: "video",
     // Picker shows videos + images; each pick appends to the slide queue.
+    accept: "video/*,image/*",
+  },
+  /** Object-scoped Smart Container — never writes a Story field. */
+  smart_container: {
+    field: "main_image",
+    bindingKey: "__smart_container__",
+    label: "Smart Container",
+    kind: "any",
     accept: "video/*,image/*",
   },
   main_image: {
@@ -156,18 +165,14 @@ export function resolveMediaTargetForObject(
     return FIELD_TARGETS.main_video;
   }
 
-  // Layers-panel Background / Smart Container — image or video slide queue.
+  // Layers-panel Background — image or video slide queue (story-backed).
   if (isBackgroundLayerObject(object)) {
     return FIELD_TARGETS.background_video;
   }
 
-  if (
-    object.metadata?.role === "smart_container" ||
-    object.metadata?.container_kind === "smart" ||
-    object.metadata?.layer_kind === "smart_container" ||
-    object.name === "Smart Container"
-  ) {
-    return FIELD_TARGETS.background_video;
+  // Smart / Slide Smart Containers — object-local queue via Mapping / Manual.
+  if (isSmartContainerObject(object)) {
+    return FIELD_TARGETS.smart_container;
   }
 
   if (
@@ -220,14 +225,22 @@ export function defaultTargetForAssetCategory(
  * Pick the Story field to write for a media target.
  * Background browse always writes `background_video` (image or video) —
  * same pattern as main video — so demo/sibling fields cannot shadow the pick.
+ * Smart Container targets never write Story fields.
  */
 export function resolveApplyFieldForTarget(
   target: StoryMediaTarget,
   _mimeType?: string,
   _url?: string,
 ): keyof StoryDataRecord {
+  if (target.bindingKey === "__smart_container__") {
+    return "main_image";
+  }
   if (target.bindingKey === "background_video") {
     return "background_video";
   }
   return target.field;
+}
+
+export function isObjectScopedMediaTarget(target: StoryMediaTarget | null | undefined): boolean {
+  return target?.bindingKey === "__smart_container__";
 }

@@ -15,9 +15,7 @@ import {
 } from "@/features/scene-composer/lib/shape-composer/defaults";
 import { SHAPE_METADATA_KEY } from "@/features/scene-composer/lib/shape-composer/types";
 
-function uid(prefix: string) {
-  return `${prefix}-${crypto.randomUUID()}`;
-}
+import { createComposerId } from "@/features/scene-composer/lib/composer-ids";
 
 export function createDefaultComposerSettings(): ComposerSettings {
   return {
@@ -74,7 +72,7 @@ export function createSceneObject(input: {
     : null;
 
   return {
-    id: uid("obj"),
+    id: createComposerId(),
     name: input.name ?? SCENE_OBJECT_TYPE_LABELS[input.objectType] ?? "Object",
     object_type: input.objectType,
     sort_order: input.sortOrder ?? 0,

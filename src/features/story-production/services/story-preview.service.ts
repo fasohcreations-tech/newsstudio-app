@@ -1,5 +1,9 @@
 import type { SceneObject } from "@/features/scene-composer/types/scene-composer.types";
 import { resolveVariableTokens } from "@/features/motion-scene-engine/lib/variable-binding";
+import {
+  mappingMediaResolveKey,
+  mappingTextResolveKey,
+} from "@/features/scene-composer/lib/story-mapping/resolve-container";
 import { parseBackgroundSlides } from "@/features/scene-composer/lib/background-slides";
 import { isLibraryMediaRef } from "@/features/story-production/lib/library-media-reference";
 import { resolveBindingMediaUrl } from "@/features/story-production/lib/story-data-bindings";
@@ -56,6 +60,12 @@ export function resolveObjectMediaUrl(
   object: SceneObject,
   bindings: Record<string, string>,
 ): string | null {
+  const mappedMedia = mediaBindingValue(
+    bindings,
+    mappingMediaResolveKey(object.id),
+  );
+  if (mappedMedia) return mappedMedia;
+
   const name = object.name.toLowerCase();
   const region =
     typeof object.metadata?.region_key === "string"
@@ -137,6 +147,15 @@ export function resolveObjectDisplayText(
   object: SceneObject,
   bindings: Record<string, string>,
 ): string {
+  const mappedText = bindings[mappingTextResolveKey(object.id)];
+  if (
+    typeof mappedText === "string" &&
+    mappedText.trim() &&
+    !mappedText.startsWith("{{")
+  ) {
+    return mappedText;
+  }
+
   if (object.object_type === "clock") {
     return bindings.time ?? "08:00";
   }

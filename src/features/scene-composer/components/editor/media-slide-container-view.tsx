@@ -116,7 +116,17 @@ export function MediaSlideContainerView({
               { opacity: 0.35, transform: "translateX(28px)" },
               { opacity: 1, transform: "translateX(0)" },
             ]
-          : null;
+          : controls.transitionStyle === "push"
+            ? [
+                { opacity: 0.4, transform: "translateX(100%)" },
+                { opacity: 1, transform: "translateX(0)" },
+              ]
+            : controls.transitionStyle === "zoom"
+              ? [
+                  { opacity: 0.2, transform: "scale(1.12)" },
+                  { opacity: 1, transform: "scale(1)" },
+                ]
+              : null;
 
     if (!keyframes) return;
     const animation = el.animate(keyframes, {

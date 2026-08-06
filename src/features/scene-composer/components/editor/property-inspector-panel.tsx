@@ -27,8 +27,8 @@ import { Switch } from "@/components/ui/switch";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { EDITOR_UI } from "@/features/scene-composer/components/editor/editor.constants";
 import { LayerBehaviorsPanel } from "@/features/scene-composer/components/editor/layer-behaviors-panel";
-import { LayerBindingsPanel } from "@/features/scene-composer/components/editor/layer-bindings-panel";
 import { LayerEffectsPanel } from "@/features/scene-composer/components/editor/layer-effects-panel";
+import { LayerMappingPanel } from "@/features/scene-composer/components/editor/layer-mapping-panel";
 import { LayerMotionFields } from "@/features/scene-composer/components/editor/layer-motion-fields";
 import { LayerShapePanel } from "@/features/scene-composer/components/editor/layer-shape-panel";
 import { MainVideoPropertiesPanel } from "@/features/scene-composer/components/panels/main-video-properties-panel";
@@ -40,6 +40,7 @@ import {
   mediaContainerToBackgroundStoryPatch,
   patchMediaContainerConfig,
 } from "@/features/scene-composer/lib/media-container";
+import { getSmartMappingConfig, resolveSmartContainerMapping, storyDataFromBindings } from "@/features/scene-composer/lib/story-mapping";
 import {
   getShapeConfig,
   isPureShapeObjectType,
@@ -96,6 +97,7 @@ export type InspectorTab =
   | "behaviors"
   | "shape"
   | "bindings"
+  | "mapping"
   | "story";
 
 const INSPECTOR_TABS: InspectorTab[] = [
@@ -107,6 +109,7 @@ const INSPECTOR_TABS: InspectorTab[] = [
   "behaviors",
   "shape",
   "bindings",
+  "mapping",
   "story",
 ];
 
@@ -794,6 +797,13 @@ export function PropertyInspectorPanel({
           >
             Bindings
           </TabsTrigger>
+          <TabsTrigger
+            value="mapping"
+            className="text-[10px]"
+            disabled={!selectedObject}
+          >
+            Mapping
+          </TabsTrigger>
           <TabsTrigger value="story" className="text-[10px]">
             Story
           </TabsTrigger>
@@ -918,13 +928,36 @@ export function PropertyInspectorPanel({
           {tab === "bindings" ? (
             <ScrollArea className="h-full">
               {selectedObject ? (
-                <LayerBindingsPanel
+                <div className="space-y-3 p-4">
+                  <p className={EDITOR_UI.panelTitle}>Data Bindings</p>
+                  <p className={EDITOR_UI.helper}>
+                    Layers never bind directly to Story fields. Use the Mapping
+                    tab — the Story Mapping Engine connects Story data to this
+                    layer.
+                  </p>
+                </div>
+              ) : (
+                <p className={`${EDITOR_UI.helper} p-4`}>
+                  Select a layer to bind it to story data.
+                </p>
+              )}
+            </ScrollArea>
+          ) : null}
+        </TabsContent>
+
+        <TabsContent value="mapping" className="min-h-0 flex-1">
+          {tab === "mapping" ? (
+            <ScrollArea className="h-full">
+              {selectedObject ? (
+                <LayerMappingPanel
                   object={selectedObject}
+                  story={data}
+                  storyBindings={data as unknown as Record<string, string>}
                   onObjectPatch={onObjectPatch}
                 />
               ) : (
                 <p className={`${EDITOR_UI.helper} p-4`}>
-                  Select a layer to bind it to story data.
+                  Select a layer to edit its Story Mapping.
                 </p>
               )}
             </ScrollArea>
@@ -2123,25 +2156,52 @@ function MediaContainerFields({
   onObjectPatch: PropertyInspectorPanelProps["onObjectPatch"];
   onBrowseMedia?: () => void;
 }) {
-  if (!selectedObject) return null;
   const storyBindings = data as unknown as Record<string, string>;
-  const config = getMediaContainerConfig(selectedObject, storyBindings);
-  const slides = useMemo(
-    () =>
-      config.slides
-        .split(",")
-        .map((value) => value.trim())
-        .filter(Boolean),
-    [config.slides],
-  );
+  const isBackground = selectedObject
+    ? isBackgroundContainerObject(selectedObject)
+    : false;
+  const isSmart = selectedObject
+    ? isSmartContainerObject(selectedObject)
+    : false;
+  const smartMapping =
+    selectedObject && isSmart ? getSmartMappingConfig(selectedObject) : null;
+  const mappingDriven =
+    Boolean(isSmart && smartMapping && smartMapping.mappingMode !== "manual");
+  const config = selectedObject
+    ? getMediaContainerConfig(selectedObject, storyBindings)
+    : null;
+  const mappedSlides = useMemo(() => {
+    if (!selectedObject || !isSmart || !mappingDriven) return null;
+    const resolved = resolveSmartContainerMapping(
+      selectedObject,
+      storyDataFromBindings(storyBindings),
+      { bindings: storyBindings },
+    );
+    return resolved.slidesRaw
+      .split(",")
+      .map((value) => value.trim())
+      .filter(Boolean);
+  }, [selectedObject, isSmart, mappingDriven, storyBindings]);
+  const slides = useMemo(() => {
+    if (mappedSlides) return mappedSlides;
+    if (!config) return [];
+    return config.slides
+      .split(",")
+      .map((value) => value.trim())
+      .filter(Boolean);
+  }, [mappedSlides, config]);
+
+  if (!selectedObject || !config) return null;
+
   const currentIndex = Math.min(
     config.slideIndex,
     Math.max(0, slides.length - 1),
   );
-  const isBackground = isBackgroundContainerObject(selectedObject);
   const title = isBackground
     ? "Background Media Container"
-    : "Smart Container";
+    : isSmart
+      ? smartMapping?.containerName || "Smart Container"
+      : "Media Container";
 
   const commitConfig = (
     patch: Parameters<typeof patchMediaContainerConfig>[1],
@@ -2197,9 +2257,16 @@ function MediaContainerFields({
     <section className="space-y-3">
       <p className={EDITOR_UI.sectionHeader}>{title}</p>
       <p className={EDITOR_UI.helper}>
-        Add images or videos as slides. Browse appends to this container&apos;s
-        queue.
+        {mappingDriven
+          ? "Slide queue is driven by the Mapping tab. Switch Mapping Mode to Manual to browse and edit slides here."
+          : "Add images or videos as slides. Browse appends to this container's queue."}
       </p>
+      {mappingDriven ? (
+        <p className="rounded-md border border-sky-500/30 bg-sky-500/10 px-3 py-2 text-[11px] text-sky-100">
+          Driven by Mapping · {smartMapping?.mappingMode} ·{" "}
+          {smartMapping?.bindingSource}
+        </p>
+      ) : null}
       <Field label="Slide Queue">
         <Input
           value={
@@ -2209,7 +2276,7 @@ function MediaContainerFields({
                 ? "Media Library asset"
                 : (slides[0] ?? "")
           }
-          readOnly={slides.length > 0}
+          readOnly={slides.length > 0 || mappingDriven}
           onChange={(e) =>
             updateSlides(
               e.target.value
@@ -2222,7 +2289,7 @@ function MediaContainerFields({
           placeholder="Browse to add image or video slides"
         />
       </Field>
-      {onBrowseMedia ? (
+      {onBrowseMedia && !mappingDriven ? (
         <Button
           type="button"
           variant="outline"
@@ -2264,7 +2331,7 @@ function MediaContainerFields({
                   variant="ghost"
                   size="icon"
                   className="size-6"
-                  disabled={index === 0}
+                  disabled={mappingDriven || index === 0}
                   onClick={() => moveSlide(index, -1)}
                 >
                   <ArrowUp className="size-3.5" />
@@ -2274,7 +2341,7 @@ function MediaContainerFields({
                   variant="ghost"
                   size="icon"
                   className="size-6"
-                  disabled={index === slides.length - 1}
+                  disabled={mappingDriven || index === slides.length - 1}
                   onClick={() => moveSlide(index, 1)}
                 >
                   <ArrowDown className="size-3.5" />
@@ -2284,6 +2351,7 @@ function MediaContainerFields({
                   variant="ghost"
                   size="icon"
                   className="size-6 text-destructive"
+                  disabled={mappingDriven}
                   onClick={() => removeSlide(index)}
                 >
                   <Trash2 className="size-3.5" />
@@ -2334,8 +2402,10 @@ function MediaContainerFields({
           </SelectTrigger>
           <SelectContent>
             <SelectItem value="cut">Cut</SelectItem>
-            <SelectItem value="fade">Fade</SelectItem>
+            <SelectItem value="fade">Fade / Cross Fade</SelectItem>
             <SelectItem value="slide">Slide</SelectItem>
+            <SelectItem value="push">Push</SelectItem>
+            <SelectItem value="zoom">Zoom</SelectItem>
           </SelectContent>
         </Select>
       </Field>

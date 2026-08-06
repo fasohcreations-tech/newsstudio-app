@@ -473,6 +473,7 @@ export const DEFAULT_LAYER_RECIPES: Recipe[] = [
     build: (options) =>
       base("smart_container", "Smart Container", options, {
         transform: { width: 640, height: 360, x: 200, y: 200 },
+        style: { fill: "transparent" },
         content: {
           media_container: {
             slides: "",
@@ -483,8 +484,59 @@ export const DEFAULT_LAYER_RECIPES: Recipe[] = [
             fit: "contain",
             autoplay: true,
           },
+          smart_mapping: {
+            containerName: "Smart Container",
+            acceptedTypes: ["image", "video"],
+            bindingSource: "static_value",
+            mappingMode: "manual",
+            fallback: "",
+            staticValue: "",
+            durationMode: "auto",
+            durationMs: 5000,
+            transition: "crossfade",
+          },
         },
-        metadata: { role: "smart_container", container_kind: "smart" },
+        metadata: {
+          role: "smart_container",
+          container_kind: "smart",
+          layer_kind: "smart_container",
+        },
+      }),
+  },
+  {
+    kind: "slide_smart_container",
+    label: "Slide Smart Container",
+    build: (options) =>
+      base("slide_smart_container", "Slide Smart Container", options, {
+        transform: { width: 640, height: 360, x: 200, y: 200 },
+        style: { fill: "transparent" },
+        content: {
+          media_container: {
+            slides: "",
+            transitionStyle: "fade",
+            intervalMs: 5000,
+            transitionMs: 600,
+            slideIndex: 0,
+            fit: "contain",
+            autoplay: true,
+          },
+          smart_mapping: {
+            containerName: "Slide Smart Container",
+            acceptedTypes: ["image", "video"],
+            bindingSource: "current_sub_headline_assets",
+            mappingMode: "slideshow",
+            fallback: "",
+            staticValue: "",
+            durationMode: "auto",
+            durationMs: 5000,
+            transition: "crossfade",
+          },
+        },
+        metadata: {
+          role: "slide_smart_container",
+          container_kind: "slide_smart",
+          layer_kind: "slide_smart_container",
+        },
       }),
   },
 

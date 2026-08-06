@@ -8,11 +8,12 @@ import {
   parseClipMediaRef,
   parseLibraryMediaRef,
 } from "@/features/story-production/lib/library-media-reference";
+import { SMART_MAPPING_CONTENT_KEY } from "@/features/scene-composer/lib/story-mapping/types";
 import type { SceneObject } from "@/features/scene-composer/types/scene-composer.types";
 
 export const MEDIA_CONTAINER_CONTENT_KEY = "media_container";
 
-export type MediaTransitionStyle = "cut" | "fade" | "slide";
+export type MediaTransitionStyle = "cut" | "fade" | "slide" | "push" | "zoom";
 export type MediaContainerFit = "cover" | "contain" | "fill";
 
 export type MediaContainerConfig = {
@@ -50,6 +51,14 @@ function isRecord(value: unknown): value is Record<string, unknown> {
   return Boolean(value) && typeof value === "object" && !Array.isArray(value);
 }
 
+/** Object hosts a Story Mapping contract (Feature 048). */
+export function hasSmartMappingConfig(
+  object: SceneObject | null | undefined,
+): boolean {
+  if (!object) return false;
+  return isRecord(object.content?.[SMART_MAPPING_CONTENT_KEY]);
+}
+
 /** Background layer or Smart Container — hosts a media slide queue. */
 export function isMediaSlideContainerObject(object: SceneObject | null | undefined): boolean {
   if (!object) return false;
@@ -61,24 +70,34 @@ export function isMediaSlideContainerObject(object: SceneObject | null | undefin
   ) {
     return true;
   }
-  if (
-    object.metadata?.role === "smart_container" ||
-    object.metadata?.container_kind === "smart" ||
-    object.metadata?.layer_kind === "smart_container" ||
-    object.name === "Smart Container"
-  ) {
-    return true;
-  }
-  return false;
+  return isSmartContainerObject(object);
+}
+
+export function isSlideSmartContainerObject(
+  object: SceneObject | null | undefined,
+): boolean {
+  if (!object) return false;
+  return (
+    object.metadata?.role === "slide_smart_container" ||
+    object.metadata?.container_kind === "slide_smart" ||
+    object.metadata?.layer_kind === "slide_smart_container" ||
+    object.name === "Slide Smart Container"
+  );
 }
 
 export function isSmartContainerObject(object: SceneObject | null | undefined): boolean {
   if (!object) return false;
+  if (isSlideSmartContainerObject(object)) return true;
+  // Story Mapping now exists on all layer types; mapping config alone must NOT
+  // classify a layer as Smart Container.
+  const hasMediaQueue = isRecord(object.content?.[MEDIA_CONTAINER_CONTENT_KEY]);
+  if (hasSmartMappingConfig(object) && hasMediaQueue) return true;
   return (
     object.metadata?.role === "smart_container" ||
     object.metadata?.container_kind === "smart" ||
     object.metadata?.layer_kind === "smart_container" ||
-    object.name === "Smart Container"
+    object.name === "Smart Container" ||
+    object.name === "Slide Smart Container"
   );
 }
 
@@ -96,7 +115,12 @@ export function isBackgroundContainerObject(
 
 function normalizeStyle(value: unknown): MediaTransitionStyle {
   const style = String(value ?? DEFAULTS.transitionStyle).toLowerCase();
-  return style === "cut" || style === "slide" || style === "fade"
+  if (style === "crossfade") return "fade";
+  return style === "cut" ||
+    style === "slide" ||
+    style === "fade" ||
+    style === "push" ||
+    style === "zoom"
     ? style
     : DEFAULTS.transitionStyle;
 }
